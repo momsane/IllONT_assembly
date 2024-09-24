@@ -34,7 +34,7 @@ rule all:
 # The pipeline assumes the reads from different lanes are already
 # concatenated into a single file
 
-############################ ILLUMINA ##########################################
+############################ ILLUMINA ############################
 
 # File names should be something like: {sample}_R1.fastq.gz
 
@@ -68,13 +68,13 @@ rule gzip_test:
         """
 
 # Incomplete/empty files are now printed to one file.
-# ! Check if the output of the following rule is empty!
+# Check the output of the following rule
 
 rule check_integrity:
     input:
         expand("../../results/check_integrity/samples/{sample}.txt", sample = SAMPLES)
     output:
-        "../../results/check_integrity/corrupted_files.txt"
+        "../../results/check_integrity/integrity_files.txt"
     threads: 1
     resources:
         account = "pengel_general_data",
@@ -276,72 +276,7 @@ rule multiqc_fastqc_pt:
         
 ### TODO
 
-# rule rawreads_trimming:
-#     input:
-#         R1=lambda wildcards: config["Illumina"][wildcards.sample][0],
-#         R2=lambda wildcards: config["Illumina"][wildcards.sample][1]
-#     output:
-#         R1_paired="../data/Illumina_reads/{sample}_L1_R1_cut_trim.fastq.gz",
-#         R2_paired="../data/Illumina_reads/{sample}_L1_R2_cut_trim.fastq.gz"
-#     threads: 8
-#     params:
-#         nextera="../resources/short_refSeqs/NexteraPE-PE.fa",
-#         q=26,
-#         min_length=50,
-#         R1_unpaired="../data/Illumina_reads/{sample}_R1_unpaired.fastq.gz",
-#         R2_unpaired="../data/Illumina_reads/{sample}_R2_unpaired.fastq.gz"
-#     log:
-#         "logs/trimming/{sample}_trimming.log"
-#     conda:
-#         "envs/trimmomatic.yaml"
-#     resources:
-#         account = "pengel_beemicrophage",
-#         mem_mb = 6000,
-#         runtime= "01:00:00"
-#     shell:
-#         "trimmomatic PE -phred33 -threads {threads} {input.R1} {input.R2} \
-#          {output.R1_paired} {params.R1_unpaired} {output.R2_paired} {params.R2_unpaired} \
-#          ILLUMINACLIP:{params.nextera}:4:25:8 \
-#          SLIDINGWINDOW:5:{params.q} MINLEN:{params.min_length}"
-
-# rule fastQC_PostTrimming:
-#     input:
-#         R1="../data/Illumina_reads/{sample}_L1_R1_cut_trim.fastq.gz",
-#         R2="../data/Illumina_reads/{sample}_L1_R2_cut_trim.fastq.gz"
-#     output:
-#         directory("../results/QC/postTrimming/QC_{sample}/")
-#     threads: 2
-#     log:
-#         "logs/Rawreads_QC/{sample}_postT_QC.log"
-#     conda:
-#         "envs/fastqc.yaml"
-#     resources:
-#         account = "pengel_beemicrophage",
-#         mem_mb = 6000,
-#         runtime= "00:20:00"
-#     shell:
-#         "mkdir -p {output}; "
-#         "fastqc -o {output} {input.R1} {input.R2}"
-
-
-# ### From here on we use all the illumina Reads
-# rule concat_lanes:
-#     input:
-#         R1s=get_direction_r1,
-#         R2s=get_direction_r2
-#     output:
-#         R1_concat="../data/concat_illumina_reads/{sample}_R1_concat.fastq.gz",
-#         R2_concat="../data/concat_illumina_reads/{sample}_R2_concat.fastq.gz"
-#     threads: 2
-#     log:
-#         "logs/raw_reads_processing/lane_concatenation/{sample}_concat.log"
-#     resources:
-#         account = "pengel_beemicrophage",
-#         runtime= "02:00:00"
-#     shell:
-#         "cat {input.R1s} > {output.R1_concat}; cat {input.R2s} > {output.R2_concat}"
-
-# ############################ ONT ##########################################
+############################ ONT ############################
 
 # # Reads Processing
 # rule ReadLength_stats:
