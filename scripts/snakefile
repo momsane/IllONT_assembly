@@ -17,7 +17,7 @@ import pandas as pd
 metadata = pd.read_table(config_file, sep='\t', header=0).set_index('sample', drop = False)
 
 #List samples
-SAMPLES = list(metadata.loc['avail' == 1, 'sample'])
+SAMPLES = metadata.loc[metadata['avail'] == 1, 'sample'].tolist()
 
 # Put here the paths to the raw reads on the cluster
 ILLUMINA_RAW = "../../data/raw_Illumina_reads"
@@ -27,7 +27,9 @@ rule all:
     input:
         "../../results/check_integrity/corrupted_files.txt",
         "../../results/count_reads_bt/count_reads_bt.txt",
-        "../../results/fastqc_pretrim/all"
+        "../../results/fastqc_pretrim/all",
+        expand("../../results/trimmed_reads/{sample}_{read}.trim.fastq.gz", sample = SAMPLES, read = ["R1", "R2"]),
+        "../../results/fastqc_posttrim/all"
 
 # The pipeline assumes the reads from different lanes are already
 # concatenated into a single file
@@ -54,14 +56,14 @@ rule gzip_test:
     shell:
         """
         if gzip -t {input.R1}; then
-            echo ""
+            echo {input.R1}": OK" > {output}
         else 
-            echo "$file" >> {output}
+            echo {input.R1}": Inappropriate file type or format" > {output}
         fi
         if gzip -t {input.R2}; then
-            echo ""
+            echo {input.R2}": OK" >> {output}
         else 
-            echo "$file" >> {output}
+            echo {input.R2}": Inappropriate file type or format" >> {output}
         fi
         """
 
@@ -106,8 +108,8 @@ rule count_reads_bt:
         """ 
         seqkit stats -T -b -e {input.R1} > {params.tmp};
         seqkit stats -T -b -e {input.R2} >> {params.tmp};
-        cat {params.tmp} | awk -v sample={wildcards.sample} 'NR == 2 {{print sample"\tR1"$0}}' > {output};
-        cat {params.tmp} | awk -v sample={wildcards.sample} 'NR == 2 {{print sample"\tR2"$0}}' >> {output};
+        cat {params.tmp} | awk -v sample={wildcards.sample} 'NR == 2 {{print sample"\tR1\t"$0}}' > {output};
+        cat {params.tmp} | awk -v sample={wildcards.sample} 'NR == 2 {{print sample"\tR2\t"$0}}' >> {output};
         rm {params.tmp}
         """
 
@@ -127,7 +129,7 @@ rule combine_readcounts_bt:
         mem_mb = 1000
     shell:
         """
-        echo -e "samples\tread\tfile\tformat\ttype\tnum_seqs\tsum_len\tmin_len\tavg_len\tmax_len" > {output};
+        echo -e "sample\tread\tfile\tformat\ttype\tnum_seqs\tsum_len\tmin_len\tavg_len\tmax_len" > {output};
         echo {input} | xargs cat >> {output}
         """
 
@@ -154,7 +156,7 @@ rule fastqc_bt:
 
 # Compile and visualize all fastqc reports together
 
-rule multiqc_fastqc_bt_bioproj:
+rule multiqc_fastqc_bt:
     input:
         expand("../../results/fastqc_pretrim/samples/{sample}", sample = SAMPLES)
     output:
@@ -173,6 +175,105 @@ rule multiqc_fastqc_bt_bioproj:
     shell:
         "multiqc --interactive -f --ignore {params.ignore} -o {output} {input}"
 
+# The metadata file is updated to indicate the adapter content and read length
+# Then you need to upload the correct adapter sequence(s) to the data folder
+
+def determine_adapters(wildcards):
+    adapt=metadata.loc[metadata['sample'] == wildcards.sample, 'adapter'].item()
+    if (adapt=='NT'):
+        return '../../data/adapters/Nextera_Transposase.fa'
+    elif (adapt=='IU'):
+        return '../../data/adapters/Illumina_Universal.fa'
+    elif (adapt=='TS'):
+        return '../../data/adapters/TruSeq.fa'
+
+def determine_k(wildcards):
+    adapt=metadata.loc[metadata['sample'] == wildcards.sample, 'adapter'].item()
+    if (adapt=='NT'):
+        return 31 #maximum allowed by bbduk
+    elif (adapt=='IU'):
+        return 19
+    elif (adapt=='TS'):
+        return 31 
+
+rule bbduk_adapt:
+    input:
+        R1 = ILLUMINA_RAW + "/{sample}_R1.fastq.gz",
+        R2 = ILLUMINA_RAW + "/{sample}_R2.fastq.gz",
+    output:
+        trim1 = "../../results/trimmed_reads/{sample}_R1.trim.fastq.gz",
+        trim2 = "../../results/trimmed_reads/{sample}_R2.trim.fastq.gz"
+    params:
+        adapt = determine_adapters,
+        k = determine_k,
+        mink = 12,
+        hdist = 1,
+        hdist2 = 0,
+        overlap = 12,
+        minlen = 40,
+        q = 26
+    log:
+        "../../logs/read_trimming/{sample}_trimming"
+    threads: 2
+    conda:
+        "../envs/bbmap-39.01.yaml"
+    resources:
+        account = "pengel_general_data",
+        runtime = "1h",
+        mem_mb = 2000
+    shell:
+        """
+        bbduk.sh in={input.R1} in2={input.R2} out={output.trim1} out2={output.trim2} \
+        ref={params.adapt} ktrim=r k={params.k} mink={params.mink} \
+        hdist={params.hdist} hdist2={params.hdist2} \
+        tpe=t tbo=t minoverlap={params.overlap} minlen={params.minlen} rcomp=f \
+        qtrim=rl trimq={params.q}
+        """
+
+# Run fastqc after trimming
+
+rule fastqc_pt:
+    input:
+        R1 = "../../results/trimmed_reads/{sample}_R1.trim.fastq.gz",
+        R2 = "../../results/trimmed_reads/{sample}_R2.trim.fastq.gz"
+    output:
+        directory("../../results/fastqc_posttrim/samples/{sample}")
+    conda:
+        "../envs/fastqc-0.11.8.yaml"
+    log:
+        "../../logs/fastqc_posttrim/samples/{sample}.log"
+    threads: 1
+    resources:
+        account = "pengel_general_data",
+        runtime = "1h",
+        mem_mb = 1000
+    shell:
+        """
+        mkdir -p {output};
+        fastqc -o {output} {input.R1} {input.R2}
+        """
+
+# Compile and visualize all fastqc reports together
+
+rule multiqc_fastqc_pt:
+    input:
+        expand("../../results/fastqc_posttrim/samples/{sample}", sample = SAMPLES)
+    output:
+        directory("../../results/fastqc_posttrim/all")
+    conda:
+        "../envs/multiqc-1.6.yaml"
+    params:
+        ignore = ".zip"
+    log:
+        "../../logs/fastqc_posttrim/multiqc.log"
+    threads: 1
+    resources:
+        account = "pengel_general_data",
+        runtime = "30m",
+        mem_mb = 2000
+    shell:
+        "multiqc --interactive -f --ignore {params.ignore} -o {output} {input}"
+        
 ### TODO
 
 # rule rawreads_trimming:
