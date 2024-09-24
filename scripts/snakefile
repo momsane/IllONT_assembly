@@ -4,10 +4,14 @@
 #data
 #results
 #logs
+#benchmarks
 
 config_file = "../config/metadata.tsv"
-# Contains one column for sample, one column with 1/0 to report if all the data is available,
-# one column with the type of adapter to trim
+# Contains:
+# - one column for sample,
+# - one column with 1/0 to report if all the data is available,
+# - one column with the type of adapter to trim
+# - one column with the average read length of the Illumina reads
 
 # Import packages
 import numpy as np
@@ -25,11 +29,12 @@ ONT_RAW = "../../data/raw_ONT_reads"
 
 rule all:
     input:
-        "../../results/check_integrity/corrupted_files.txt",
-        "../../results/count_reads_bt/count_reads_bt.txt",
-        "../../results/fastqc_pretrim/all",
-        expand("../../results/trimmed_reads/{sample}_{read}.trim.fastq.gz", sample = SAMPLES, read = ["R1", "R2"]),
-        "../../results/fastqc_posttrim/all"
+        "../../results/Illumina/check_integrity/integrity_files.txt",
+        "../../results/Illumina/count_reads_bt/count_reads_bt.txt",
+        "../../results/Illumina/fastqc_pretrim/all",
+        "../../results/Illumina/fastqc_posttrim/all",
+        "../../results/ONT/readstats_bf/readstats_bf_all.txt",
+        "../../results/ONT/readstats_af/readstats_af_all.txt"
 
 # The pipeline assumes the reads from different lanes are already
 # concatenated into a single file
@@ -47,7 +52,7 @@ rule gzip_test:
         R1 = ILLUMINA_RAW + "/{sample}_R1.fastq.gz",
         R2 = ILLUMINA_RAW + "/{sample}_R2.fastq.gz",
     output:
-        "../../results/check_integrity/samples/{sample}.txt"
+        "../../results/Illumina/check_integrity/samples/{sample}.txt"
     threads: 1
     resources:
         account = "pengel_general_data",
@@ -72,9 +77,9 @@ rule gzip_test:
 
 rule check_integrity:
     input:
-        expand("../../results/check_integrity/samples/{sample}.txt", sample = SAMPLES)
+        expand("../../results/Illumina/check_integrity/samples/{sample}.txt", sample = SAMPLES)
     output:
-        "../../results/check_integrity/integrity_files.txt"
+        "../../results/Illumina/check_integrity/integrity_files.txt"
     threads: 1
     resources:
         account = "pengel_general_data",
@@ -92,13 +97,13 @@ rule count_reads_bt:
         R1 = ILLUMINA_RAW + "/{sample}_R1.fastq.gz",
         R2 = ILLUMINA_RAW + "/{sample}_R2.fastq.gz",
     output:
-        "../../results/count_reads_bt/samples/count_reads_bt_{sample}.txt"
+        "../../results/Illumina/count_reads_bt/samples/count_reads_bt_{sample}.txt"
     params:
-        tmp = "../../results/count_reads_bt/samples/count_reads_bt_{sample}.temp.txt"
+        tmp = "../../results/Illumina/count_reads_bt/samples/count_reads_bt_{sample}.temp.txt"
     conda:
         "../envs/seqkit-2.6.1.yaml"
     log:
-        "../../logs/count_reads_bt/samples/{sample}.log"
+        "../../logs/Illumina/count_reads_bt/samples/{sample}.log"
     threads: 1
     resources:
         account = "pengel_general_data",
@@ -117,11 +122,11 @@ rule count_reads_bt:
 
 rule combine_readcounts_bt:
     input:
-        expand("../../results/count_reads_bt/samples/count_reads_bt_{sample}.txt", sample = SAMPLES)
+        expand("../../results/Illumina/count_reads_bt/samples/count_reads_bt_{sample}.txt", sample = SAMPLES)
     output:
-        "../../results/count_reads_bt/count_reads_bt.txt"
+        "../../results/Illumina/count_reads_bt/count_reads_bt.txt"
     log:
-        "../../logs/count_reads_bt/combine_readcounts.log"
+        "../../logs/Illumina/count_reads_bt/combine_readcounts.log"
     threads: 1
     resources:
         account = "pengel_general_data",
@@ -138,11 +143,11 @@ rule fastqc_bt:
         R1 = ILLUMINA_RAW + "/{sample}_R1.fastq.gz",
         R2 = ILLUMINA_RAW + "/{sample}_R2.fastq.gz",
     output:
-        directory("../../results/fastqc_pretrim/samples/{sample}")
+        directory("../../results/Illumina/fastqc_pretrim/samples/{sample}")
     conda:
         "../envs/fastqc-0.11.8.yaml"
     log:
-        "../../logs/fastqc_pretrim/samples/{sample}.log"
+        "../../logs/Illumina/fastqc_pretrim/samples/{sample}.log"
     threads: 1
     resources:
         account = "pengel_general_data",
@@ -158,15 +163,15 @@ rule fastqc_bt:
 
 rule multiqc_fastqc_bt:
     input:
-        expand("../../results/fastqc_pretrim/samples/{sample}", sample = SAMPLES)
+        expand("../../results/Illumina/fastqc_pretrim/samples/{sample}", sample = SAMPLES)
     output:
-        directory("../../results/fastqc_pretrim/all")
+        directory("../../results/Illumina/fastqc_pretrim/all")
     conda:
         "../envs/multiqc-1.6.yaml"
     params:
         ignore = ".zip"
     log:
-        "../../logs/fastqc_pretrim/multiqc.log"
+        "../../logs/Illumina/fastqc_pretrim/multiqc.log"
     threads: 1
     resources:
         account = "pengel_general_data",
@@ -179,7 +184,7 @@ rule multiqc_fastqc_bt:
 # Then you need to upload the correct adapter sequence(s) to the data folder
 
 def determine_adapters(wildcards):
-    adapt=metadata.loc[metadata['sample'] == wildcards.sample, 'adapter'].item()
+    adapt=metadata.loc[metadata['sample'] == wildcards.sample, 'Illumina_adapter'].item()
     if (adapt=='NT'):
         return '../../data/adapters/Nextera_Transposase.fa'
     elif (adapt=='IU'):
@@ -188,7 +193,7 @@ def determine_adapters(wildcards):
         return '../../data/adapters/TruSeq.fa'
 
 def determine_k(wildcards):
-    adapt=metadata.loc[metadata['sample'] == wildcards.sample, 'adapter'].item()
+    adapt=metadata.loc[metadata['sample'] == wildcards.sample, 'Illumina_adapter'].item()
     if (adapt=='NT'):
         return 31 #maximum allowed by bbduk
     elif (adapt=='IU'):
@@ -204,8 +209,8 @@ rule bbduk_adapt:
         R1 = ILLUMINA_RAW + "/{sample}_R1.fastq.gz",
         R2 = ILLUMINA_RAW + "/{sample}_R2.fastq.gz",
     output:
-        trim1 = "../../results/trimmed_reads/{sample}_R1.trim.fastq.gz",
-        trim2 = "../../results/trimmed_reads/{sample}_R2.trim.fastq.gz"
+        trim1 = "../../results/Illumina/trimmed_reads/{sample}_R1.trim.fastq.gz",
+        trim2 = "../../results/Illumina/trimmed_reads/{sample}_R2.trim.fastq.gz"
     params:
         adapt = determine_adapters,
         k = determine_k,
@@ -216,7 +221,7 @@ rule bbduk_adapt:
         minlen = 40,
         q = 26
     log:
-        "../../logs/read_trimming/{sample}_trimming"
+        "../../logs/Illumina/read_trimming/{sample}_trimming"
     threads: 2
     conda:
         "../envs/bbmap-39.01.yaml"
@@ -237,14 +242,14 @@ rule bbduk_adapt:
 
 rule fastqc_pt:
     input:
-        R1 = "../../results/trimmed_reads/{sample}_R1.trim.fastq.gz",
-        R2 = "../../results/trimmed_reads/{sample}_R2.trim.fastq.gz"
+        R1 = "../../results/Illumina/trimmed_reads/{sample}_R1.trim.fastq.gz",
+        R2 = "../../results/Illumina/trimmed_reads/{sample}_R2.trim.fastq.gz"
     output:
-        directory("../../results/fastqc_posttrim/samples/{sample}")
+        directory("../../results/Illumina/fastqc_posttrim/samples/{sample}")
     conda:
         "../envs/fastqc-0.11.8.yaml"
     log:
-        "../../logs/fastqc_posttrim/samples/{sample}.log"
+        "../../logs/Illumina/fastqc_posttrim/samples/{sample}.log"
     threads: 1
     resources:
         account = "pengel_general_data",
@@ -260,15 +265,15 @@ rule fastqc_pt:
 
 rule multiqc_fastqc_pt:
     input:
-        expand("../../results/fastqc_posttrim/samples/{sample}", sample = SAMPLES)
+        expand("../../results/Illumina/fastqc_posttrim/samples/{sample}", sample = SAMPLES)
     output:
-        directory("../../results/fastqc_posttrim/all")
+        directory("../../results/Illumina/fastqc_posttrim/all")
     conda:
         "../envs/multiqc-1.6.yaml"
     params:
         ignore = ".zip"
     log:
-        "../../logs/fastqc_posttrim/multiqc.log"
+        "../../logs/Illumina/fastqc_posttrim/multiqc.log"
     threads: 1
     resources:
         account = "pengel_general_data",
@@ -276,68 +281,132 @@ rule multiqc_fastqc_pt:
         mem_mb = 2000
     shell:
         "multiqc --interactive -f --ignore {params.ignore} -o {output} {input}"
-        
-### TODO
 
 ############################ ONT ############################
 
-# # Reads Processing
-# rule ReadLength_stats:
-#     input:
-#         ONT=lambda wildcards: config["ONT"][wildcards.sample]
-#     output:
-#         "../results/raw_reads_processing/ONT/{sample}_raw_readLength.txt"
-#     threads: 2
-#     log:
-#         "logs/raw_reads_processing/ONT/{sample}_raw_readLength.log"
-#     resources:
-#         account = "pengel_beemicrophage",
-#         mem_mb = 4000,
-#         runtime= "00:30:00"
-#     shell:
-#         "echo '{wildcards.sample}' > {output}; "
-#         "(less {input.ONT} | awk '{{if(NR%4==2) print length($1)}}' >> {output}) 2> {log} "
+# First we want to compute a few stats on the raw reads
 
-# rule ReadLength_summary:
-#         input:
-#             expand("../results/raw_reads_processing/ONT/{sample}_raw_readLength.txt", sample=config["samples"])
-#         output:
-#             "../results/raw_reads_processing/ONT/all_raw_readLength.txt"
-#         threads: 2
-#         log:
-#             "logs/raw_reads_processing/ONT/summary_raw_readLength.log"
-#         resources:
-#             account = "pengel_beemicrophage",
-#             mem_mb = 4000,
-#             runtime= "00:30:00"
-#         shell:
-#             "(paste -d '\t' {input} > {output}) 2> {log}"
+rule readstats_bf:
+    input:
+        ONT_RAW + "/{sample}.fastq.gz"
+    output:
+        "../../results/ONT/readstats_bf/samples/readstats_bf_{sample}.txt"
+    params:
+        tmp = "../../results/ONT/readstats_bf/samples/{sample}.tmp"
+    conda:
+        "../envs/seqkit-2.6.1.yaml"
+    log:
+        "../../logs/ONT/readstats_bf/{sample}.log"
+    threads: 1
+    resources:
+        account = "pengel_general_data",
+        runtime = "1h",
+        mem_mb = 2000
+    shell:
+        """ 
+        seqkit stats -T -b -e {input} > {output};
+        awk -v sample={wildcards.sample} 'NR == 2 {{print sample"\t"$0}}' {output} \
+        > {params.tmp} && mv {params.tmp} {output}
+        """
 
-# rule read_filtering:
-#     input:
-#         lambda wildcards: config["ONT"][wildcards.sample]
-#     output:
-#         "../data/ONT_reads_filtered/{sample}_ONT_filtered.fastq"
-#     threads: 5
-#     log:
-#         "logs/raw_reads_processing/ONT/{sample}_ONT_filtering.log"
-#     conda:
-#         "envs/filtlong.yaml"
-#     resources:
-#         account = "pengel_beemicrophage",
-#         mem_mb = 8000,
-#         runtime= "02:00:00"
-#     params:
-#         MINIMUM_read_LENGTH=1000,
-#         min_mean_q=10,
-#         length_weight=10,
-#         target_bases=400000000
-#     shell:
-#         "(filtlong --min_length {params.MINIMUM_read_LENGTH} \
-#         --min_mean_q {params.min_mean_q} \
-#         --length_weight {params.length_weight} \
-#         --target_bases {params.target_bases}  \
-#         {input}  > {output})2> {log}"
+# Combining all the read stats into one file 
+
+rule combine_readstats_bf:
+    input:
+        expand("../../results/ONT/readstats_bf/samples/readstats_bf_{sample}.txt", sample = SAMPLES)
+    output:
+        "../../results/ONT/readstats_bf/readstats_bf_all.txt"
+    log:
+        "../../logs/ONT/readstats_bf/all.log"
+    threads: 1
+    resources:
+        account = "pengel_general_data",
+        runtime = "30m",
+        mem_mb = 1000
+    shell:
+        """
+        echo -e "sample\tfile\tformat\ttype\tnum_seqs_bf\tsum_len_bf\tmin_len_bf\tavg_len_bf\tmax_len_bf" > {output};
+        echo {input} | xargs cat >> {output}
+        """
+
+# Then we filter the reads to remove short and low quality reads
+
+rule read_filtering:
+    input:
+        ONT_RAW + "/{sample}.fastq.gz"
+    output:
+        "../../results/ONT/filtered_reads/{sample}_ONT_filtered.fastq.gz"
+    params:
+        min_readlen = 500,
+        min_meanq = 10,
+        length_weight = 10,
+        target_bases = 400000000
+    conda:
+        "../envs/filtlong-0.2.1.yaml"
+    log:
+        "../../logs/ONT/filtlong/{sample}_filtlong.log"
+    benchmark:
+        "../../benchmarks/filtlong/{sample}_filtlong.benchmark"
+    threads: 2
+    resources:
+        account = "pengel_general_data",
+        runtime = "30m",
+        mem_mb = 2000
+    shell:
+        """
+        (filtlong --min_length {params.min_readlen} \
+        --min_mean_q {params.min_meanq} \
+        --length_weight {params.length_weight} \
+        --target_bases {params.target_bases}  \
+        {input} | gzip > {output})2> {log}
+        """
+
+# Recompute read stats after filtering
+
+rule readstats_af:
+    input:
+        "../../results/ONT/filtered_reads/{sample}_ONT_filtered.fastq.gz"
+    output:
+        "../../results/ONT/readstats_af/samples/readstats_af_{sample}.txt"
+    params:
+        tmp = "../../results/ONT/readstats_af/samples/{sample}.tmp"
+    conda:
+        "../envs/seqkit-2.6.1.yaml"
+    log:
+        "../../logs/ONT/readstats_af/{sample}.log"
+    threads: 1
+    resources:
+        account = "pengel_general_data",
+        runtime = "1h",
+        mem_mb = 2000
+    shell:
+        """ 
+        seqkit stats -T -b -e {input} > {output};
+        awk -v sample={wildcards.sample} 'NR == 2 {{print sample"\t"$0}}' {output} \
+        > {params.tmp} && mv {params.tmp} {output}
+        """
+
+# Combining all the read stats into one file 
+
+rule combine_readstats_af:
+    input:
+        expand("../../results/ONT/readstats_af/samples/readstats_af_{sample}.txt", sample = SAMPLES)
+    output:
+        "../../results/ONT/readstats_af/readstats_af_all.txt"
+    log:
+        "../../logs/ONT/readstats_af/all.log"
+    threads: 1
+    resources:
+        account = "pengel_general_data",
+        runtime = "30m",
+        mem_mb = 1000
+    shell:
+        """
+        echo -e "sample\tfile\tformat\ttype\tnum_seqs_af\tsum_len_af\tmin_len_af\tavg_len_af\tmax_len_af" > {output};
+        echo {input} | xargs cat >> {output}
+        """
+
+### TODO
 
 # rule ReadLength_AF_stats:
 #     input:
