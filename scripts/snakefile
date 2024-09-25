@@ -33,8 +33,8 @@ rule all:
         "../../results/Illumina/count_reads_bt/count_reads_bt.txt",
         "../../results/Illumina/fastqc_pretrim/all",
         "../../results/Illumina/fastqc_posttrim/all",
-        "../../results/ONT/readstats_bf/readstats_bf_all.txt",
-        "../../results/ONT/readstats_af/readstats_af_all.txt"
+        expand("../../results/ONT/readstats_{stage}/readstats_{stage}_all.txt", stage = ["bf", "af"]),
+        expand("../../results/ONT/assembly/{sample}_assembly", sample = SAMPLES)
 
 # The pipeline assumes the reads from different lanes are already
 # concatenated into a single file
@@ -183,6 +183,8 @@ rule multiqc_fastqc_bt:
 # The metadata file is updated to indicate the adapter content and read length
 # Then you need to upload the correct adapter sequence(s) to the data folder
 
+### Trimming
+
 def determine_adapters(wildcards):
     adapt=metadata.loc[metadata['sample'] == wildcards.sample, 'Illumina_adapter'].item()
     if (adapt=='NT'):
@@ -284,6 +286,10 @@ rule multiqc_fastqc_pt:
 
 ############################ ONT ############################
 
+# File names should be something like: {sample}.fastq.gz
+
+### QC and trimming/filtering
+
 # First we want to compute a few stats on the raw reads
 
 rule readstats_bf:
@@ -291,10 +297,8 @@ rule readstats_bf:
         ONT_RAW + "/{sample}.fastq.gz"
     output:
         "../../results/ONT/readstats_bf/samples/readstats_bf_{sample}.txt"
-    params:
-        tmp = "../../results/ONT/readstats_bf/samples/{sample}.tmp"
     conda:
-        "../envs/seqkit-2.6.1.yaml"
+        "../envs/nanoq-0.10.0.yaml"
     log:
         "../../logs/ONT/readstats_bf/{sample}.log"
     threads: 1
@@ -304,30 +308,42 @@ rule readstats_bf:
         mem_mb = 2000
     shell:
         """ 
-        seqkit stats -T -b -e {input} > {output};
-        awk -v sample={wildcards.sample} 'NR == 2 {{print sample"\t"$0}}' {output} \
-        > {params.tmp} && mv {params.tmp} {output}
+        nanoq -i {input} --json -s -vv > {output}
         """
 
-# Combining all the read stats into one file 
+# Combining all the read stats into one file: this rule parses all json outputs to turn
+# them into a tabular format then combines them into one file
 
-rule combine_readstats_bf:
+rule combine_readstats:
     input:
-        expand("../../results/ONT/readstats_bf/samples/readstats_bf_{sample}.txt", sample = SAMPLES)
+        expand("../../results/ONT/readstats_{stage}/samples/readstats_{stage}_{sample}.txt", sample = SAMPLES, stage = "{stage}")
     output:
-        "../../results/ONT/readstats_bf/readstats_bf_all.txt"
+        "../../results/ONT/readstats_{stage}/readstats_{stage}_all.txt"
     log:
-        "../../logs/ONT/readstats_bf/all.log"
+        "../../logs/ONT/readstats_{stage}/all.log"
     threads: 1
     resources:
         account = "pengel_general_data",
         runtime = "30m",
         mem_mb = 1000
-    shell:
-        """
-        echo -e "sample\tfile\tformat\ttype\tnum_seqs_bf\tsum_len_bf\tmin_len_bf\tavg_len_bf\tmax_len_bf" > {output};
-        echo {input} | xargs cat >> {output}
-        """
+    run:
+        import json
+        import pandas as pd
+        
+        combined_df = pd.DataFrame()
+        
+        for input_file in input:
+            sample_name = input_file.split('_')[-1].replace('.txt', '')
+            
+            with open(input_file, 'r') as f:
+                data = json.load(f)
+                data['sample'] = sample_name  # Add sample to the data
+                df = pd.DataFrame.from_dict(pd.json_normalize(data), orient='columns')
+                
+                combined_df = pd.concat([combined_df, df], ignore_index=True)
+        
+        combined_df.set_index('sample', inplace=True)
+        combined_df.to_csv(output[0], sep='\t', index=True)
 
 # Then we filter the reads to remove short and low quality reads
 
@@ -337,7 +353,7 @@ rule read_filtering:
     output:
         "../../results/ONT/filtered_reads/{sample}_ONT_filtered.fastq.gz"
     params:
-        min_readlen = 500,
+        min_readlen = 800,
         min_meanq = 10,
         length_weight = 10,
         target_bases = 400000000
@@ -368,10 +384,8 @@ rule readstats_af:
         "../../results/ONT/filtered_reads/{sample}_ONT_filtered.fastq.gz"
     output:
         "../../results/ONT/readstats_af/samples/readstats_af_{sample}.txt"
-    params:
-        tmp = "../../results/ONT/readstats_af/samples/{sample}.tmp"
     conda:
-        "../envs/seqkit-2.6.1.yaml"
+        "../envs/nanoq-0.10.0.yaml"
     log:
         "../../logs/ONT/readstats_af/{sample}.log"
     threads: 1
@@ -381,84 +395,34 @@ rule readstats_af:
         mem_mb = 2000
     shell:
         """ 
-        seqkit stats -T -b -e {input} > {output};
-        awk -v sample={wildcards.sample} 'NR == 2 {{print sample"\t"$0}}' {output} \
-        > {params.tmp} && mv {params.tmp} {output}
+        nanoq -i {input} --json -s -vv > {output}
         """
 
-# Combining all the read stats into one file 
+# Combine all the read stats into one file: reuse rule combine_readstats
 
-rule combine_readstats_af:
+### Assembly
+
+rule ONT_assembly:
     input:
-        expand("../../results/ONT/readstats_af/samples/readstats_af_{sample}.txt", sample = SAMPLES)
+        "../../results/ONT/filtered_reads/{sample}_ONT_filtered.fastq.gz"
     output:
-        "../../results/ONT/readstats_af/readstats_af_all.txt"
+        directory("../../results/ONT/assembly/{sample}_assembly")
     log:
-        "../../logs/ONT/readstats_af/all.log"
-    threads: 1
+        "../../logs/ONT/assembly/{sample}_ONT_assembly.log"
+    benchmark:
+        "../../benchmarks/ONT/assembly/{sample}_ONT_assembly.benchmark"
+    conda:
+        "../envs/flye-2.9.5.yaml"
+    threads: 2
     resources:
         account = "pengel_general_data",
-        runtime = "30m",
-        mem_mb = 1000
+        mem_mb = 12000,
+        runtime= "1h"
     shell:
         """
-        echo -e "sample\tfile\tformat\ttype\tnum_seqs_af\tsum_len_af\tmin_len_af\tavg_len_af\tmax_len_af" > {output};
-        echo {input} | xargs cat >> {output}
+        flye --threads {threads} --iterations 5 --nano-raw \
+        {input} --out-dir {output}
         """
-
-### TODO
-
-# rule ReadLength_AF_stats:
-#     input:
-#         ONT="../data/ONT_reads_filtered/{sample}_ONT_filtered.fastq"
-#     output:
-#         "../results/raw_reads_processing/ONT/after_filtering/{sample}_AF_readLength.txt"
-#     threads: 2
-#     log:
-#         "logs/raw_reads_processing/ONT/{sample}_AF_readLength.log"
-#     resources:
-#         account = "pengel_beemicrophage",
-#         mem_mb = 4000,
-#         runtime= "00:30:00"
-#     shell:
-#         "echo '{wildcards.sample}' > {output}; "
-#         "(less {input.ONT} | awk '{{if(NR%4==2) print length($1)}}' >> {output}) 2> {log} "
-
-# rule ReadLength_AF_summary:
-#         input:
-#             expand("../results/raw_reads_processing/ONT/after_filtering/{sample}_AF_readLength.txt", sample=config["samples"])
-#         output:
-#             "../results/raw_reads_processing/ONT/after_filtering/all_AF_readLength.txt"
-#         threads: 2
-#         log:
-#             "logs/raw_reads_processing/ONT/summary_AF_readLength.log"
-#         resources:
-#             account = "pengel_beemicrophage",
-#             mem_mb = 4000,
-#             runtime= "00:30:00"
-#         shell:
-#             "(paste -d '\t' {input} > {output}) 2> {log}"
-
-# # ONT assembly
-# rule ONT_assembly:
-#     input:
-#         "../data/ONT_reads_filtered/{sample}_ONT_filtered.fastq"
-#     output:
-#         directory("../data/ONT_assembly/{sample}_ONT_assembly")
-#     threads: 12
-#     log:
-#         "logs/ONT_assembly/{sample}_ONT_assembly.log"
-#     conda:
-#         "envs/flye.yaml"
-#     resources:
-#         account = "pengel_beemicrophage",
-#         mem_mb = 16000,
-#         runtime= "03:00:00"
-#     params:
-#         #GENOME_SIZE=2.5m
-#     shell:
-#         "flye --threads {threads} --iterations 5 --nano-raw \
-#       {input} --out-dir {output}"
 
 # rule ONT_assembly_stats:
 #     input:
