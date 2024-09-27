@@ -196,6 +196,9 @@ def determine_k(wildcards):
     elif (adapt=='TS'):
         return 31 
 
+# hdist is set to 2 to allow for 2 mismatches in the adapter sequence
+# which more stringent than the default of 1
+
 rule bbduk_adapt:
     input:
         R1 = ILLUMINA_RAW + "/{sample}_R1.fastq.gz",
@@ -206,8 +209,8 @@ rule bbduk_adapt:
     params:
         adapt = determine_adapters,
         k = determine_k,
-        mink = 12,
-        hdist = 1,
+        mink = 11,
+        hdist = 2,
         hdist2 = 0,
         overlap = 12,
         minlen = 40,
