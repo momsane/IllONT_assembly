@@ -1,0 +1,280 @@
+---
+title: "Bifidos Genome Assembly"
+author: "Mam Malick Sy Ndiaye"
+date: "10/14/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(ggplot2)
+library(tidyverse)
+library(reshape2)
+```
+
+# Raw Reads Processing
+
+## Raw Reads
+
+```{r}
+read_len<- "../../results/raw_reads_processing/ONT/all_raw_readLength.txt"
+len_df<- read.table(read_len, header=T, sep="\t")
+len_df2<- len_df %>% pivot_longer(colnames(len_df), names_to = "sample", values_to = "length") %>% filter(! is.na(length)) %>% group_by(sample) %>% arrange(sample, length)
+
+head(len_df2)
+```
+```{r}
+summary_len<- len_df2 %>% group_by(sample) %>% dplyr::summarize("n_reads"=length(length),
+                                                                  "mean_len"=mean(length),
+                                                                "median_len"=median(length),
+                                                                  "max_len"= max(length),
+                                                                "stage"= "before filtering")
+
+summary_len
+```
+```{r}
+histoPlot <- ggplot(len_df2,aes(x=length))+
+  geom_histogram(binwidth = 500)+
+  theme_classic()+
+  geom_vline(xintercept = 5000,color="blue")+
+  facet_wrap(.~sample, scales = "free")#
+  
+histoPlot
+```
+```{r}
+len_df3<- len_df2 %>% group_by(sample) %>% mutate("Cumsum_forward" = cumsum(length), 
+                                                  "Cumsum_reverse" = max(Cumsum_forward) - cumsum(length))
+
+Half_seq_df <- len_df3 %>% group_by(sample) %>% summarise("h"=max(Cumsum_forward)/2)
+Half_sequencing_output<- Half_seq_df$h
+names(Half_sequencing_output)<- Half_seq_df$sample
+
+len_df3<- len_df3 %>% mutate(H_seq=Half_sequencing_output[sample])
+
+head(len_df3)
+```
+```{r}
+genome_size=2000000
+expected_genome_coverage=50
+bases_needed <- genome_size*expected_genome_coverage
+
+bases_needed
+
+cumSumPlot_01 <- ggplot(len_df3,aes(x=length,y=Cumsum_reverse))+
+  geom_point()+
+  geom_hline(aes(yintercept = H_seq), color="green")+
+  geom_hline(aes(yintercept = bases_needed),color="red")+
+  geom_vline(xintercept = 5000,color="blue")+
+  theme_classic()+
+  labs(y="Reverse Cummulative read sum")+
+  theme(axis.title.x = element_blank(),axis.text.x = element_blank())+
+  facet_wrap(.~sample, scales = "free")
+  
+
+cumSumPlot_01
+```
+
+## Filtered Reads Length
+```{r}
+read_len<- "../../results/raw_reads_processing/ONT/after_filtering/all_AF_readLength.txt"
+len_df<- read.table(read_len, header=T, sep="\t")
+len_df2<- len_df %>% pivot_longer(colnames(len_df), names_to = "sample", values_to = "length") %>% filter(! is.na(length)) %>% group_by(sample) %>% arrange(sample, length)
+
+head(len_df2)
+```
+```{r}
+summary_len_filt<- len_df2 %>% group_by(sample) %>% dplyr::summarize("n_reads"=length(length),
+                                                                  "mean_len"=mean(length),
+                                                                "median_len"=median(length),
+                                                                  "max_len"= max(length),
+                                                                "stage"="After Filtering")
+
+
+summary_reads<- rbind(summary_len, summary_len_filt)
+
+
+ggplot(summary_reads, aes(x=sample, y=n_reads, fill=stage))+
+  geom_bar(stat = "identity", position = position_dodge())+
+  theme_classic()
+```
+
+
+```{r}
+histoPlot <- ggplot(len_df2,aes(x=length))+
+  geom_histogram(binwidth = 500)+
+  theme_classic()+
+  geom_vline(xintercept = 5000,color="blue")+
+  facet_wrap(.~sample, scales = "free")#
+  
+histoPlot
+```
+```{r}
+len_df3<- len_df2 %>% group_by(sample) %>% mutate("Cumsum_forward" = cumsum(length), 
+                                                  "Cumsum_reverse" = max(Cumsum_forward) - cumsum(length))
+
+Half_seq_df <- len_df3 %>% group_by(sample) %>% summarise("h"=max(Cumsum_forward)/2)
+Half_sequencing_output<- Half_seq_df$h
+names(Half_sequencing_output)<- Half_seq_df$sample
+
+len_df3<- len_df3 %>% mutate(H_seq=Half_sequencing_output[sample])
+
+head(len_df3)
+```
+
+```{r}
+genome_size=2000000
+expected_genome_coverage=50
+bases_needed <- genome_size*expected_genome_coverage
+
+bases_needed
+
+cumSumPlot_01 <- ggplot(len_df3,aes(x=length,y=Cumsum_reverse))+
+  geom_point()+
+  geom_hline(aes(yintercept = H_seq), color="green")+
+  geom_hline(aes(yintercept = bases_needed),color="red")+
+  geom_vline(xintercept = 5000,color="blue")+
+  theme_classic()+
+  labs(y="Reverse Cummulative read sum")+
+  theme(axis.title.x = element_blank(),axis.text.x = element_blank())+
+  facet_wrap(.~sample, scales = "free")
+  
+
+cumSumPlot_01
+```
+# Assembly
+
+## Draft assembly
+```{r}
+asmbl <- "../../data/ONT_assembly/all_contigs_stats.txt"
+asmbl_df<- read.csv(asmbl, header=T, sep="\t") %>% group_by(graph_path) %>%
+  mutate(sample= strsplit(graph_path, split = "/")[[1]][4]) %>%
+  group_by(sample) %>%
+  mutate(sample= strsplit(sample, split = "_")[[1]][1])
+```
+
+### Assembly graphs
+![ESL0170](../../results/ONT_assembly/assembly_graphs/ESL0170_ONT_assembly_graph.jpg)
+![ESL0198](../../results/ONT_assembly/assembly_graphs/ESL0198_ONT_assembly_graph.jpg)
+![ESL0819](../../results/ONT_assembly/assembly_graphs/ESL0819_ONT_assembly_graph.jpg)
+![ESL0819](../../results/ONT_assembly/assembly_graphs/ESL0819_ONT_assembly_graph.jpg)
+![ESL0820](../../results/ONT_assembly/assembly_graphs/ESL0820_ONT_assembly_graph.jpg)
+![ESL0822](../../results/ONT_assembly/assembly_graphs/ESL0822_ONT_assembly_graph.jpg)
+![ESL0824](../../results/ONT_assembly/assembly_graphs/ESL0824_ONT_assembly_graph.jpg)
+![ESL0825](../../results/ONT_assembly/assembly_graphs/ESL0825_ONT_assembly_graph.jpg)
+![ESL0827](../../results/ONT_assembly/assembly_graphs/ESL0827_ONT_assembly_graph.jpg)
+
+## polishing Assembly
+
+###QUAST 
+
+```{r}
+htmltools::includeHTML("../../results/ONT_assembly/polishing_QC/ESL0170_assembly_QC/report.html")
+htmltools::includeHTML("../../results/ONT_assembly/polishing_QC/ESL0198_assembly_QC/report.html")
+htmltools::includeHTML("../../results/ONT_assembly/polishing_QC/ESL0200_assembly_QC/report.html")
+htmltools::includeHTML("../../results/ONT_assembly/polishing_QC/ESL0819_assembly_QC/report.html")
+htmltools::includeHTML("../../results/ONT_assembly/polishing_QC/ESL0820_assembly_QC/report.html")
+htmltools::includeHTML("../../results/ONT_assembly/polishing_QC/ESL0822_assembly_QC/report.html")
+htmltools::includeHTML("../../results/ONT_assembly/polishing_QC/ESL0824_assembly_QC/report.html")
+htmltools::includeHTML("../../results/ONT_assembly/polishing_QC/ESL0825_assembly_QC/report.html")
+htmltools::includeHTML("../../results/ONT_assembly/polishing_QC/ESL0827_assembly_QC/report.html")
+```
+### Mapping
+```{r}
+flg<- "../../results/ONT_assembly/polishing_QC/all_mapstats.txt"
+
+flg_df<-read.csv(flg, header=T, sep="\t")
+
+flg_df
+```
+
+```{r Illumina Reads mapping to polished genome}
+flg_df2<- melt(flg_df, id.vars = "sample", 
+               measure.var = c("perc_mapped", "perc_prop", "perc_singleton"))
+
+ggplot(flg_df2, aes(x=sample, y=value, fill=variable))+
+  geom_bar(stat = "identity", position = position_dodge())+
+  theme_classic()
+```
+```{r}
+base_cov<- "../../results/ONT_assembly/bases_cov/all_bases_cov.txt"
+
+cov_df<- read.csv(base_cov, header=T, sep="\t")
+head(cov_df)
+```
+```{r}
+cov_df2<- cov_df %>% group_by(sample) %>% 
+  mutate("n_bin" = ceiling(length(sample) / 100)) %>% group_by(sample) %>% 
+  mutate("bin"=cut(base, breaks = unique(n_bin), labels = FALSE)) 
+
+head(cov_df2$bin, n = 210)
+```
+
+```{r}
+cov_df3<- cov_df2 %>% group_by(contig) %>% 
+  mutate("contig_borders"=length(contig)) %>% 
+  group_by(sample, bin) %>% 
+  dplyr::summarize("Depth"=mean(cov),
+                   "Locus"=mean(base),
+                   "LocusKB"=Locus/1000)
+  
+
+
+```
+
+```{r}
+movMeanCirc <- function(depths, window = 500, focus = 1){
+  ####
+  #DESCRIPTION
+  # function to compute sliding window average depth for circular chromosome
+  # around a given focus base pair
+  ##
+  #ARGUMENTS
+  # depths: vector of integers representing read depth
+  # window: nr of bp before and after focus to include in average. Defaults to 500
+  # focus:  index integer indicating around which bp to compute average. Defaults to 1
+  ##
+  #SET-UP
+  # 1. define linear before-after index around focus with given window size
+  # 2. find real, circular before and after index
+  # 3. if before <= end: mean of values within window; else outside window
+  ####
+
+  # max linear index value
+  linear_end <- length(depths)
+  # 1. direct, linear index values
+  index_left <- focus - window
+  index_right <- focus + window
+  # 2. real, circular index values
+  index_before <- ifelse(index_left >= 1,
+                         yes = index_left,
+                         no = linear_end + index_left)
+  index_after <- ifelse(index_right <= linear_end,
+                        yes = index_right,
+                        no = index_right - linear_end)
+  # 3. mean sliding window
+  res <- ifelse(index_before <= index_after,
+                yes = mean(depths[index_before:index_after]),
+                no = mean(depths[-((index_after + 1):(index_before - 1))]))
+  # return result
+  return(res)
+}
+```
+
+```{r}
+cov_df4<- cov_df3 %>% group_by(sample) %>% 
+  mutate("SlidingAverage"=sapply(X = 1:length(sample),
+                                 FUN = movMeanCirc,
+                                 depths = Depth, 
+                                 window = 500))
+
+ggplot(cov_df4, aes(x = LocusKB, y = Depth)) +
+  geom_line(col = "grey") +
+  geom_line(aes(y = SlidingAverage), col = "blue") + # add an extra layer
+  #geom_vline(aes(xintercept = cov_df4$contig_borders), col = "red", lty = 2) +
+  labs(x = "Locus (kb)") +
+  ylim(c(0,max(cov_df4$SlidingAverage)))+
+  theme_bw(base_size = 16)+
+  facet_wrap(.~sample)
+```
+
+
