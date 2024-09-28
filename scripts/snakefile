@@ -1,6 +1,6 @@
 #command to symlink scratch: ln -s /scratch/mgarci14 ../../results/scratch
 #wd=/work/FAC/FBM/DMF/pengel/general_data/syncom_ONT_seq/workflow/scripts
-#workflow=scripts, envs, config
+#workflow = scripts, envs, config
 #data
 #results
 #logs
@@ -11,7 +11,7 @@ config_file = "../config/metadata.tsv"
 # - one column for sample,
 # - one column with 1/0 to report if all the data is available,
 # - one column with the type of adapter to trim
-# - one column with the average read length of the Illumina reads
+# - one column indicating if the samples passes the quality controls
 
 # Import packages
 import numpy as np
@@ -22,22 +22,32 @@ metadata = pd.read_table(config_file, sep='\t', header=0).set_index('sample', dr
 
 #List samples
 SAMPLES = metadata.loc[metadata['avail'] == 1, 'sample'].tolist()
+#SAMPLES = metadata['sample'].tolist()
 
-# Put here the paths to the raw reads on the cluster
+# Put here the paths to the raw reads folders on the cluster
 ILLUMINA_RAW = "../../data/raw_Illumina_reads"
 ONT_RAW = "../../data/raw_ONT_reads"
 
 rule all:
     input:
+        # Illumina reads pre-processing
         "../../results/Illumina/check_integrity/integrity_files.txt",
         "../../results/Illumina/count_reads_bt/count_reads_bt.txt",
         "../../results/Illumina/fastqc_pretrim/all",
         "../../results/Illumina/fastqc_posttrim/all",
+        # ONT reads pre-processing
+        # "../../results/ONT/check_integrity/integrity_files.txt"
         expand("../../results/ONT/readstats_{stage}/readstats_{stage}_all.txt", stage = ["bf", "af"]),
-        expand("../../results/ONT/assembly/{sample}_assembly", sample = SAMPLES)
+        # ONT assembly
+        "../../results/ONT/assembly/all_contigs_stats.txt",
+        expand("../../results/ONT/assembly/bandage/{sample}_ONT_assembly_graph.jpg", sample = SAMPLES),
+        # ONT polishing
+        expand("../../results/ONT/polishing/{sample}_polishing_ONT", sample = SAMPLES),
+        # Illumina polishing
+        expand("../../results/final_polishing/{sample}_polishing_illumina", sample = SAMPLES)
 
 # The pipeline assumes the reads from different lanes are already
-# concatenated into a single file
+# concatenated into a single file for both Illumina and ONT reads
 
 ############################ ILLUMINA ############################
 
@@ -45,9 +55,10 @@ rule all:
 
 # First we QC the Illumina reads
 
-## Check that all raw read files are complete.
+## Check that all raw read files are complete
+# Not needed if you could verify the md5sums
 
-rule gzip_test:
+rule gzip_test_Illumina:
     input:
         R1 = ILLUMINA_RAW + "/{sample}_R1.fastq.gz",
         R2 = ILLUMINA_RAW + "/{sample}_R2.fastq.gz",
@@ -77,9 +88,9 @@ rule gzip_test:
 
 rule check_integrity:
     input:
-        expand("../../results/Illumina/check_integrity/samples/{sample}.txt", sample = SAMPLES)
+        expand("../../results/{platform}/check_integrity/samples/{sample}.txt", sample = SAMPLES, platform = "{platform}")
     output:
-        "../../results/Illumina/check_integrity/integrity_files.txt"
+        "../../results/{platform}/check_integrity/integrity_files.txt"
     threads: 1
     resources:
         account = "pengel_general_data",
@@ -288,6 +299,30 @@ rule multiqc_fastqc_pt:
 
 # File names should be something like: {sample}.fastq.gz
 
+# Check that files are intact
+# Not needed if you could verify the md5sums
+
+rule gzip_test_ONT:
+    input:
+        ONT_RAW + "/{sample}.fastq.gz"
+    output:
+        "../../results/ONT/check_integrity/samples/{sample}.txt"
+    threads: 1
+    resources:
+        account = "pengel_general_data",
+        runtime = "20m",
+        mem_mb = 500
+    shell:
+        """
+        if gzip -t {input}; then
+            echo {input}": OK" > {output}
+        else 
+            echo {input}": Inappropriate file type or format" > {output}
+        fi
+        """
+
+# Reuse rule check_integrity
+
 ### QC and trimming/filtering
 
 # First we want to compute a few stats on the raw reads
@@ -410,125 +445,122 @@ rule ONT_assembly:
     log:
         "../../logs/ONT/assembly/{sample}_ONT_assembly.log"
     benchmark:
-        "../../benchmarks/ONT/assembly/{sample}_ONT_assembly.benchmark"
+        "../../benchmarks/assembly/{sample}_ONT_assembly.benchmark"
     conda:
         "../envs/flye-2.9.5.yaml"
-    threads: 2
+    threads: 4
     resources:
         account = "pengel_general_data",
         mem_mb = 12000,
         runtime= "1h"
     shell:
+        "flye --threads {threads} --iterations 5 --nano-raw {input} --out-dir {output}"
+
+# Next we compute some assembly stats
+
+rule ONT_assembly_stats:
+    input:
+        fld = expand("../../results/ONT/assembly/{sample}_assembly", sample = SAMPLES),
+        stats = expand("../../results/ONT/assembly/{sample}_assembly/30-contigger/contigs_stats.txt", sample = SAMPLES)
+    output:
+        "../../results/ONT/assembly/all_contigs_stats.txt"
+    log:
+        "../../logs/ONT/assembly/summay_assembly.log"
+    params:
+        tmp = "../../results/ONT/assembly/tmp.txt"
+    threads: 1
+    resources:
+        account = "pengel_general_data",
+        mem_mb = 500,
+        runtime= "10m"
+    shell:
         """
-        flye --threads {threads} --iterations 5 --nano-raw \
-        {input} --out-dir {output}
+        echo -e 'file\tseq_name\tlength\tcoverage\tcircular\trepeat\tmult\ttelomere\talt_group\tgraph_path' > {params.tmp};
+        for file in {input.stats}; do
+        awk -v fname="$file" -F '\t' 'NR > 1 {{print fname"\t"$0}}' "$file" >> {params.tmp};
+        done;
+        sed '/#/ d' < {params.tmp} > {output};
+        rm {params.tmp}
         """
 
-# rule ONT_assembly_stats:
-#     input:
-#         dir=expand("../data/ONT_assembly/{sample}_ONT_assembly", sample=config["ONT"]),
-#         stats=expand("../data/ONT_assembly/{sample}_ONT_assembly/30-contigger/contigs_stats.txt", sample=config["ONT"])
-#     output:
-#         "../data/ONT_assembly/all_contigs_stats.txt"
-#     threads: 1
-#     log:
-#         "logs/ONT_assembly/summay_assembly.log"
-#     params:
-#         spacer="\t",
-#         tmp="../data/ONT_assembly/tmp.txt"
-#     resources:
-#         account = "pengel_beemicrophage",
-#         mem_mb = 1000,
-#         runtime= "00:20:00"
-#     shell:
-#         "echo -e 'seq_name\tlength\tcoverage\tcircular\trepeat\tmult\ttelomere\talt_group\tgraph_path\tsample' > {params.tmp}; "
-#         "awk '{{print $0 {params.spacer} FILENAME; next;}}' {input.stats} >> {params.tmp}; "
-#         "sed '/^#/ d' < {params.tmp} > {output}; "
-#         "rm {params.tmp}"
+# And visualize the assembly graph
 
-# rule bandage_assembly:
-#     input:
-#         dir="../data/ONT_assembly/{sample}_ONT_assembly",
-#         graph="../data/ONT_assembly/{sample}_ONT_assembly/assembly_graph.gfa"
-#     output:
-#         "../results/ONT_assembly/assembly_graphs/{sample}_ONT_assembly_graph.jpg"
-#     threads: 2
-#     log:
-#         "logs/ONT_assembly/{sample}_ONT_assembly_graph.log"
-#     conda:
-#         "envs/bandage.yaml"
-#     resources:
-#         account = "pengel_beemicrophage",
-#         mem_mb = 2000,
-#         runtime= "01:00:00"
-#     shell:
-#         "Bandage image {input.graph} {output}"
+rule bandage_assembly:
+    input:
+        fld = "../../results/ONT/assembly/{sample}_assembly",
+        graph = "../../results/ONT/assembly/{sample}_assembly/assembly_graph.gfa"
+    output:
+        "../../results/ONT/assembly/bandage/{sample}_ONT_assembly_graph.jpg"
+    threads: 2
+    log:
+        "../../logs/ONT/assembly/{sample}_ONT_assembly_graph.log"
+    conda:
+        "../envs/bandage-0.8.1.yaml"
+    resources:
+        account = "pengel_general_data",
+        mem_mb = 2000,
+        runtime= "1h"
+    shell:
+        "Bandage image {input.graph} {output}"
 
-# rule ONT_polishing:
-#     input:
-#         ONT_reads="../data/ONT_reads_filtered/{sample}_ONT_filtered.fastq",
-#         ONT_asmbl="../data/ONT_assembly/{sample}_ONT_assembly/assembly.fasta"
-#     output:
-#         dir=directory("../data/ONT_assembly/polishing/ONT/{sample}_polishing_ONT"),
-#         asmbl1="../data/ONT_assembly/polishing/ONT/{sample}_polishing_ONT/01_first_Racon_graphmap/assembly/{sample}_first_Racon_Assembly.fasta",
-#         asmbl2="../data/ONT_assembly/polishing/ONT/{sample}_polishing_ONT/02_second_Racon_graphmap/assembly/{sample}_second_Racon_Assembly.fasta"
-#     threads: 12
-#     log:
-#         "logs/ONT_assembly/polishing/{sample}_ONT_polishing.log"
-#     conda:
-#         "envs/ONT_polishing.yaml"
-#     resources:
-#         account = "pengel_beemicrophage",
-#         mem_mb = 16000,
-#         runtime= "03:00:00"
-#     shell:
-#         "./scripts/post_assembly/ONT_polishing.sh {wildcards.sample} {input.ONT_reads} {input.ONT_asmbl} \
-#         {output.dir}"
+# Polish ONT assembly with ONT reads
+# Do not forget to make script executable: chmod +x ONT_polishing.sh
 
+# !!! Important note: use graphmap version 0.5.2, not later
+# Newest versions (graphmap2) are meant only for RNA mapping
 
-# ############################ Both ##########################################
-# rule RawReads_stats:
-#     input:
-#         ill="../data/concat_illumina_reads/{sample}_R1_concat.fastq.gz",
-#         ONT=lambda wildcards: config["ONT"][wildcards.sample]
-#     output:
-#         "../results/raw_reads_processing/both/{sample}_raw_reads_stats.txt"
-#     threads: 2
-#     log:
-#         "logs/raw_reads_processing/both/{sample}_read_count.log"
-#     resources:
-#         account = "pengel_beemicrophage",
-#         mem_mb = 4000,
-#         runtime= "00:30:00"
-#     shell:
-#         "touch {output}; "
-#         "(./scripts/pre_assembly/raw_reads_stats.sh {input.ill} {input.ONT} {output})2>{log}"
+rule ONT_polishing:
+    input:
+        ONT_reads = "../../results/ONT/filtered_reads/{sample}_ONT_filtered.fastq.gz",
+        ONT_asmbl = "../../results/ONT/assembly/{sample}_assembly/assembly.fasta"
+    output:
+        fld = directory("../../results/ONT/polishing/{sample}_polishing_ONT"),
+        asmbl1 = "../../results/ONT/polishing/{sample}_polishing_ONT/01_first_Racon_graphmap/assembly/{sample}_first_Racon_Assembly.fasta",
+        asmbl2 = "../../results/ONT/polishing/{sample}_polishing_ONT/02_second_Racon_graphmap/assembly/{sample}_second_Racon_Assembly.fasta"
+    benchmark:
+        "../../benchmarks/polishing/{sample}_ONT_polishing.benchmark"
+    log:
+        "../../logs/ONT/polishing/{sample}_ONT_polishing.log"
+    conda:
+        "../envs/ONT_polishing.yaml"
+    threads: 4
+    resources:
+        account = "pengel_general_data",
+        mem_mb = 2500,
+        runtime= "1h"
+    shell:
+        "./ONT_polishing.sh {wildcards.sample} {input.ONT_reads} {input.ONT_asmbl} {output.fld}"
 
-# rule illumina_polishing:
-#     input:
-#         ill_R1="../data/concat_illumina_reads/{sample}_R1_concat.fastq.gz",
-#         ill_R2="../data/concat_illumina_reads/{sample}_R2_concat.fastq.gz",
-#         dir="../data/ONT_assembly/polishing/ONT/{sample}_polishing_ONT",
-#         ONT_asmbl="../data/ONT_assembly/polishing/ONT/{sample}_polishing_ONT/02_second_Racon_graphmap/assembly/{sample}_second_Racon_Assembly.fasta"
-#     output:
-#         dir=directory("../data/ONT_assembly/polishing/illumina/{sample}_polishing_illumina"),
-#         file3="../data/ONT_assembly/polishing/illumina/{sample}_polishing_illumina/05_third_pillon_bowtie2/assembly/{sample}_third_Pilon_Assembly.fasta",
-#         file2="../data/ONT_assembly/polishing/illumina/{sample}_polishing_illumina/04_second_pillon_bowtie2/assembly/{sample}_second_Pilon_Assembly.fasta",
-#         file1="../data/ONT_assembly/polishing/illumina/{sample}_polishing_illumina/03_first_pillon_bowtie2/assembly/{sample}_first_Pilon_Assembly.fasta"
-#     threads: 12
-#     log:
-#         "logs/ONT_assembly/polishing/illumina/{sample}_illumina_polishing.log"
-#     # conda:
-#     #     "envs/illumina_polishing.yaml" #TODO for some reason, if you run this in a conda env it doesn't work, skips the pilon step, so I'll use the cluster modules
-#     resources:
-#         account = "pengel_beemicrophage",
-#         mem_mb = 16000,
-#         runtime= "03:00:00"
-#     shell:
-#         "(./scripts/post_assembly/illumina_polishing.sh {threads} {input.ONT_asmbl} \
-#         {input.ill_R1} {input.ill_R2} \
-#         {output.dir} {wildcards.sample}) 2> {log}"
+############################ Both ############################
 
+# Polish ONT assembly with Illumina reads
+# Do not forget to make script executable: chmod +x illumina_polishing.sh
+
+rule illumina_polishing:
+    input:
+        ill_R1 = ILLUMINA_RAW + "/{sample}_R1.fastq.gz",
+        ill_R2 = ILLUMINA_RAW + "/{sample}_R2.fastq.gz",
+        fld = "../../results/ONT/polishing/{sample}_polishing_ONT",
+        ONT_asmbl = "../../results/ONT/polishing/{sample}_polishing_ONT/02_second_Racon_graphmap/assembly/{sample}_second_Racon_Assembly.fasta"
+    output:
+        fld = directory("../../results/final_polishing/{sample}_polishing_illumina"),
+        file1 = "../../results/final_polishing/{sample}_polishing_illumina/03_first_pillon_bowtie2/assembly/{sample}_first_Pilon_Assembly.fasta",
+        file2 = "../../results/final_polishing/{sample}_polishing_illumina/04_second_pillon_bowtie2/assembly/{sample}_second_Pilon_Assembly.fasta",
+        file3 = "../../results/final_polishing/{sample}_polishing_illumina/05_third_pillon_bowtie2/assembly/{sample}_third_Pilon_Assembly.fasta"
+    log:
+        "../../logs/final_polishing/{sample}_illumina_polishing.log"
+    conda:
+        "../envs/illumina_polishing.yaml"
+    threads: 12
+    resources:
+        account = "pengel_general_data",
+        mem_mb = 16000,
+        runtime= "3h"
+    shell:
+        """
+        (./illumina_polishing.sh {threads} {input.ONT_asmbl} \
+        {input.ill_R1} {input.ill_R2} {output.fld} {wildcards.sample}) 2> {log}
+        """
 # rule assembly_QC:
 #     input:
 #         pillon3="../data/ONT_assembly/polishing/illumina/{sample}_polishing_illumina/05_third_pillon_bowtie2/assembly/{sample}_third_Pilon_Assembly.fasta",
