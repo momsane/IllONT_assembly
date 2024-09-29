@@ -544,9 +544,11 @@ rule illumina_polishing:
         ONT_asmbl = "../../results/ONT/polishing/{sample}_polishing_ONT/02_second_Racon_graphmap/assembly/{sample}_second_Racon_Assembly.fasta"
     output:
         fld = directory("../../results/final_polishing/{sample}_polishing_illumina"),
-        file1 = "../../results/final_polishing/{sample}_polishing_illumina/03_first_pillon_bowtie2/assembly/{sample}_first_Pilon_Assembly.fasta",
-        file2 = "../../results/final_polishing/{sample}_polishing_illumina/04_second_pillon_bowtie2/assembly/{sample}_second_Pilon_Assembly.fasta",
-        file3 = "../../results/final_polishing/{sample}_polishing_illumina/05_third_pillon_bowtie2/assembly/{sample}_third_Pilon_Assembly.fasta"
+        file1 = "../../results/final_polishing/{sample}_polishing_illumina/03_first_pilon_bowtie2/assembly/{sample}_first_Pilon_Assembly.fasta",
+        file2 = "../../results/final_polishing/{sample}_polishing_illumina/04_second_pilon_bowtie2/assembly/{sample}_second_Pilon_Assembly.fasta",
+        file3 = "../../results/final_polishing/{sample}_polishing_illumina/05_third_pilon_bowtie2/assembly/{sample}_third_Pilon_Assembly.fasta"
+    benchmark:
+        "../../benchmarks/final_polishing/{sample}_illumina_polishing.benchmark"
     log:
         "../../logs/final_polishing/{sample}_illumina_polishing.log"
     conda:
@@ -554,21 +556,22 @@ rule illumina_polishing:
     threads: 12
     resources:
         account = "pengel_general_data",
-        mem_mb = 16000,
-        runtime= "3h"
+        mem_mb = 8000,
+        runtime= "1h"
     shell:
         """
         (./illumina_polishing.sh {threads} {input.ONT_asmbl} \
         {input.ill_R1} {input.ill_R2} {output.fld} {wildcards.sample}) 2> {log}
         """
+
 # rule assembly_QC:
 #     input:
-#         pillon3="../data/ONT_assembly/polishing/illumina/{sample}_polishing_illumina/05_third_pillon_bowtie2/assembly/{sample}_third_Pilon_Assembly.fasta",
+#         pilon3="../data/ONT_assembly/polishing/illumina/{sample}_polishing_illumina/05_third_pilon_bowtie2/assembly/{sample}_third_Pilon_Assembly.fasta",
 #         ONT="../data/ONT_assembly/{sample}_ONT_assembly/assembly.fasta",
 #         racon1="../data/ONT_assembly/polishing/ONT/{sample}_polishing_ONT/01_first_Racon_graphmap/assembly/{sample}_first_Racon_Assembly.fasta",
 #         racon2="../data/ONT_assembly/polishing/ONT/{sample}_polishing_ONT/02_second_Racon_graphmap/assembly/{sample}_second_Racon_Assembly.fasta",
-#         pillon1="../data/ONT_assembly/polishing/illumina/{sample}_polishing_illumina/03_first_pillon_bowtie2/assembly/{sample}_first_Pilon_Assembly.fasta",
-#         pillon2="../data/ONT_assembly/polishing/illumina/{sample}_polishing_illumina/04_second_pillon_bowtie2/assembly/{sample}_second_Pilon_Assembly.fasta"
+#         pilon1="../data/ONT_assembly/polishing/illumina/{sample}_polishing_illumina/03_first_pilon_bowtie2/assembly/{sample}_first_Pilon_Assembly.fasta",
+#         pilon2="../data/ONT_assembly/polishing/illumina/{sample}_polishing_illumina/04_second_pilon_bowtie2/assembly/{sample}_second_Pilon_Assembly.fasta"
 #     output:
 #         directory("../results/ONT_assembly/polishing_QC/{sample}_assembly_QC/")
 #     threads: 12
@@ -583,18 +586,18 @@ rule illumina_polishing:
 #     shell:
 #         "(quast.py \
 #         -l 'FlyeAssembly,first_ONT_racon,second_ONT_racon,first_Illumina_pilon,second_Illumina_pilon' \
-#         -R {input.pillon3} \
+#         -R {input.pilon3} \
 #           {input.ONT} \
 #           {input.racon1} \
 #           {input.racon2} \
-#           {input.pillon1} \
-#           {input.pillon2} \
+#           {input.pilon1} \
+#           {input.pilon2} \
 #           -o  {output}) 2> {log}"
 
 # rule ONT_assembly_mapping:
 #         input:
 #             dir="../data/ONT_assembly/polishing/illumina/{sample}_polishing_illumina",
-#             bam="../data/ONT_assembly/polishing/illumina/{sample}_polishing_illumina/04_second_pillon_bowtie2/bowtie2/second_pillon_ONT2FinalAssembly_sorted.bam"
+#             bam="../data/ONT_assembly/polishing/illumina/{sample}_polishing_illumina/04_second_pilon_bowtie2/bowtie2/second_pilon_ONT2FinalAssembly_sorted.bam"
 #         output:
 #             map_reads="../results/ONT_assembly/polishing_QC/{sample}_assembly_QC/{sample}_mapping.txt",
 #             map_bases="../results/ONT_assembly/bases_cov/{sample}_read_mapping_per_base.txt"
@@ -635,7 +638,7 @@ rule illumina_polishing:
 # ############################ ANNOTATION ##########################################
 # rule move_final_assemblies:
 #     input:
-#         asmbl=expand("../data/ONT_assembly/polishing/illumina/{sample}_polishing_illumina/05_third_pillon_bowtie2/assembly/{sample}_third_Pilon_Assembly.fasta", sample=config["samples"])
+#         asmbl=expand("../data/ONT_assembly/polishing/illumina/{sample}_polishing_illumina/05_third_pilon_bowtie2/assembly/{sample}_third_Pilon_Assembly.fasta", sample=config["samples"])
 #     output:
 #         db=directory("../resources/checkm_db"),
 #         dir=directory("../results/ONT_assembly/final_assemblies/")
