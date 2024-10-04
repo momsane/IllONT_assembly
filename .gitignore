@@ -2,3 +2,5 @@ scripts/checkm.sh
 scripts/gtdbtk.sh
 .DS_Store
 scripts/raw_reads_stats.sh
+scripts/.Rhistory
+scripts/illumina_polishing.sh

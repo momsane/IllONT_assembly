@@ -59,7 +59,7 @@ for Illumina_polishing_counter in $(echo "first second third"); do
   --frags ${bam} \
   --output ${sample_name}_${Illumina_polishing_counter}_Pilon_Assembly \
   --outdir ${root}/assembly/ \
-  --changes
+  --changes --debug
 
   tree ${root}
 

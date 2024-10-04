@@ -1,6 +1,6 @@
 library(tidyverse)
 
-bases_tabs<-unlist(snakemake@input[["map_bases"]])
+bases_tabs<-unlist(snakemake@input[["bases"]])
 
 bases_concat<- function(bases_file){
   sam_name<- unlist(strsplit(bases_file, split = "/"))
@@ -18,7 +18,7 @@ write.table(a, file=snakemake@output[["all_bases"]], sep = "\t", quote=F, , row.
 
 #
 
-flagstats<-unlist(snakemake@input[["map_reads"]])
+flagstats<-unlist(snakemake@input[["reads"]])
 
 format_flagstat<- function(file){
   sam_name<- unlist(strsplit(file, split = "/"))

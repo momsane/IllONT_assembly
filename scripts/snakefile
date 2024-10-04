@@ -21,8 +21,9 @@ import pandas as pd
 metadata = pd.read_table(config_file, sep='\t', header=0).set_index('sample', drop = False)
 
 #List samples
-SAMPLES = metadata.loc[metadata['avail'] == 1, 'sample'].tolist()
-#SAMPLES = metadata['sample'].tolist()
+# SAMPLES = metadata['sample'].tolist()
+# SAMPLES = metadata.loc[metadata['Illumina_avail'] == 1, 'sample'].tolist()
+SAMPLES = metadata.loc[(metadata['Illumina_avail'] == 1) & (metadata['include_downstream'] == 1), 'sample'].tolist()
 
 # Put here the paths to the raw reads folders on the cluster
 ILLUMINA_RAW = "../../data/raw_Illumina_reads"
@@ -38,18 +39,22 @@ rule all:
         # ONT reads pre-processing
         # "../../results/ONT/check_integrity/integrity_files.txt"
         expand("../../results/ONT/readstats_{stage}/readstats_{stage}_all.txt", stage = ["bf", "af"]),
-        # ONT assembly
-        "../../results/ONT/assembly/all_contigs_stats.txt",
-        expand("../../results/ONT/assembly/bandage/{sample}_ONT_assembly_graph.jpg", sample = SAMPLES),
-        # ONT polishing
-        expand("../../results/ONT/polishing/{sample}_polishing_ONT", sample = SAMPLES),
-        # Illumina polishing
-        expand("../../results/final_polishing/{sample}_polishing_illumina", sample = SAMPLES)
+        # Hybracter: assembly and polishing
+        "../../results/hybracter/test",
+        expand("../../results/hybracter/{sample}_hybracter", sample = SAMPLES),
+        # Global stats
+        "../../results/hybracter/hybracter_summary_all.tsv",
+        "../../results/assembly/samples_assembly_stats.txt",
+        expand("../../results/assembly/bandage/{sample}_assembly_graph.jpg", sample = SAMPLES),
+        expand("../../results/final_assemblies/{sample}_assembly.fasta", sample = SAMPLES),
+        "../../results/checkm",
+        # Illumina mapping stats
+        "../../results/Illumina_mapping/all_read_mapstats.txt"
 
 # The pipeline assumes the reads from different lanes are already
 # concatenated into a single file for both Illumina and ONT reads
 
-############################ ILLUMINA ############################
+############################ ILLUMINA reads processing ############################
 
 # File names should be something like: {sample}_R1.fastq.gz
 
@@ -295,7 +300,7 @@ rule multiqc_fastqc_pt:
     shell:
         "multiqc --interactive -f --ignore {params.ignore} -o {output} {input}"
 
-############################ ONT ############################
+############################ ONT reads processing ############################
 
 # File names should be something like: {sample}.fastq.gz
 
@@ -435,39 +440,126 @@ rule readstats_af:
 
 # Combine all the read stats into one file: reuse rule combine_readstats
 
-### Assembly
+# ### Assembly
 
-rule ONT_assembly:
+# rule ONT_assembly:
+#     input:
+#         "../../results/ONT/filtered_reads/{sample}_ONT_filtered.fastq.gz"
+#     output:
+#         directory("../../results/ONT/assembly/{sample}_assembly")
+#     log:
+#         "../../logs/ONT/assembly/{sample}_ONT_assembly.log"
+#     benchmark:
+#         "../../benchmarks/assembly/{sample}_ONT_assembly.benchmark"
+#     conda:
+#         "../envs/flye-2.9.5.yaml"
+#     threads: 4
+#     resources:
+#         account = "pengel_general_data",
+#         mem_mb = 12000,
+#         runtime= "1h"
+#     shell:
+#         "flye --threads {threads} --iterations 5 --nano-raw {input} --out-dir {output}"
+
+############################ Hybracter ############################
+
+# Hybracter is a snakemake-based software that runs the flye assembly,
+# polishing with long reads (medaka, two rounds)
+# polishing with short reads (polypolish and pypolca, 1 round each)
+# intermediate quality controls and comparisons between each polishing step
+
+rule init_hybracter:
     input:
-        "../../results/ONT/filtered_reads/{sample}_ONT_filtered.fastq.gz"
+        expand("../../results/ONT/filtered_reads/{sample}_ONT_filtered.fastq.gz", sample = SAMPLES)
     output:
-        directory("../../results/ONT/assembly/{sample}_assembly")
+        install = directory("../../results/hybracter/installation"),
+        test = directory("../../results/hybracter/test")
     log:
-        "../../logs/ONT/assembly/{sample}_ONT_assembly.log"
-    benchmark:
-        "../../benchmarks/assembly/{sample}_ONT_assembly.benchmark"
+        "../../logs/hybracter/init.log"
+    threads: 1
     conda:
-        "../envs/flye-2.9.5.yaml"
-    threads: 4
+        "../envs/hybracter-0.9.0.yaml"
     resources:
         account = "pengel_general_data",
-        mem_mb = 12000,
-        runtime= "1h"
+        mem_mb = 1000,
+        runtime= "2h"
     shell:
-        "flye --threads {threads} --iterations 5 --nano-raw {input} --out-dir {output}"
+        """
+        hybracter install -o {output.install};
+        hybracter test-hybrid -o {output.test}
+        """
 
-# Next we compute some assembly stats
+def get_size(wildcards):
+    size = metadata.loc[metadata['sample'] == wildcards.sample, 'estimated_genome_size'].item()
+    return int(size)
 
-rule ONT_assembly_stats:
+rule hybracter:
     input:
-        fld = expand("../../results/ONT/assembly/{sample}_assembly", sample = SAMPLES),
-        stats = expand("../../results/ONT/assembly/{sample}_assembly/30-contigger/contigs_stats.txt", sample = SAMPLES)
+        filtered_ont = "../../results/ONT/filtered_reads/{sample}_ONT_filtered.fastq.gz",
+        R1 = "../../results/Illumina/trimmed_reads/{sample}_R1.trim.fastq.gz",
+        R2 = "../../results/Illumina/trimmed_reads/{sample}_R2.trim.fastq.gz"
     output:
-        "../../results/ONT/assembly/all_contigs_stats.txt"
-    log:
-        "../../logs/ONT/assembly/summay_assembly.log"
+        fld = directory("../../results/hybracter/{sample}_hybracter"),
+        summary = "../../results/hybracter/{sample}_hybracter/FINAL_OUTPUT/hybracter_summary.tsv"
     params:
-        tmp = "../../results/ONT/assembly/tmp.txt"
+        size = get_size
+    benchmark:
+        "../../benchmarks/hybracter/{sample}_hybracter.benchmark"
+    log:
+        "../../logs/hybracter/{sample}_hybracter.log"
+    conda:
+        "../envs/hybracter-0.9.0.yaml"
+    threads: 1
+    resources:
+        account = "pengel_general_data",
+        mem_mb = 8000,
+        runtime= "5h"
+    shell:
+        """
+        hybracter hybrid-single -l {input.filtered_ont} \
+        -1 {input.R1} -2 {input.R2} \
+        -s {wildcards.sample} -c {params.size} -o {output} \
+        -t {threads} --skip_qc --logic best
+        """
+
+############################ Genomes QC ############################
+
+# If some samples are of poor quality, hybracter will exit without producing an output
+# so we need to update the /config/metadata.tsv file to exclude them from downstream analysis
+
+# First we combine the hybracter summary outputs
+
+rule hybracter_summary:
+    input:
+        fld = expand("../../results/hybracter/{sample}_hybracter", sample = SAMPLES),
+        summaries = expand("../../results/hybracter/{sample}_hybracter/FINAL_OUTPUT/hybracter_summary.tsv", sample = SAMPLES)
+    output:
+        "../../results/hybracter/hybracter_summary_all.tsv"
+    log:
+        "../../logs/hybracter/summary_all.log"
+    threads: 1
+    resources:
+        account = "pengel_general_data",
+        mem_mb = 500,
+        runtime= "5m"
+    shell:
+        """
+        echo -e 'Sample\tComplete\tTotal_assembly_length\tNumber_of_contigs\tMost_accurate_polishing_round\tLongest_contig_length\tLongest_contig_coverage\tNumber_circular_plasmids' > {output};
+        echo {input.summaries} | xargs tail -q -n +2 >> {output}
+        """
+
+# Then we combine the assembly stats from flye
+
+rule flye_assembly_stats:
+    input:
+        fld = expand("../../results/hybracter/{sample}_hybracter", sample = SAMPLES),
+        stats = expand("../../results/hybracter/{sample}_hybracter/supplementary_results/flye_individual_summaries/{sample}_assembly_info.txt", sample = SAMPLES)
+    output:
+        "../../results/assembly/samples_assembly_stats.txt"
+    log:
+        "../../logs/assembly/assembly_stats.log"
+    params:
+        tmp = "../../results/assembly/tmp.txt"
     threads: 1
     resources:
         account = "pengel_general_data",
@@ -487,15 +579,15 @@ rule ONT_assembly_stats:
 
 rule bandage_assembly:
     input:
-        fld = "../../results/ONT/assembly/{sample}_assembly",
-        graph = "../../results/ONT/assembly/{sample}_assembly/assembly_graph.gfa"
+        fld = "../../results/hybracter/{sample}_hybracter",
+        graph = "../../results/hybracter/{sample}_hybracter/processing/assemblies/{sample}/assembly_graph.gfa"
     output:
-        "../../results/ONT/assembly/bandage/{sample}_ONT_assembly_graph.jpg"
-    threads: 2
+        "../../results/assembly/bandage/{sample}_assembly_graph.jpg"
     log:
-        "../../logs/ONT/assembly/{sample}_ONT_assembly_graph.log"
+        "../../logs/assembly/{sample}_assembly_graph.log"
     conda:
         "../envs/bandage-0.8.1.yaml"
+    threads: 2
     resources:
         account = "pengel_general_data",
         mem_mb = 2000,
@@ -503,176 +595,136 @@ rule bandage_assembly:
     shell:
         "Bandage image {input.graph} {output}"
 
-# Polish ONT assembly with ONT reads
-# Do not forget to make script executable: chmod +x ONT_polishing.sh
+# Rename contigs to have sample name, replace " " by "_"
+# and put all complete assemblies in a single folder
 
-# !!! Important note: use graphmap version 0.5.2, not later
-# Newest versions (graphmap2) are meant only for RNA mapping
+def get_fasta(wildcards):
+    if metadata.loc[metadata['sample'] == wildcards.sample, 'complete'].item() == 1:
+        return "../../results/hybracter/{sample}_hybracter/FINAL_OUTPUT/complete/{sample}_final.fasta"
+    else:
+        return "../../results/hybracter/{sample}_hybracter/FINAL_OUTPUT/incomplete/{sample}_final.fasta"
 
-rule ONT_polishing:
+rule final_assemblies:
     input:
-        ONT_reads = "../../results/ONT/filtered_reads/{sample}_ONT_filtered.fastq.gz",
-        ONT_asmbl = "../../results/ONT/assembly/{sample}_assembly/assembly.fasta"
+        fld = "../../results/hybracter/{sample}_hybracter",
+        fasta = get_fasta
     output:
-        fld = directory("../../results/ONT/polishing/{sample}_polishing_ONT"),
-        asmbl1 = "../../results/ONT/polishing/{sample}_polishing_ONT/01_first_Racon_graphmap/assembly/{sample}_first_Racon_Assembly.fasta",
-        asmbl2 = "../../results/ONT/polishing/{sample}_polishing_ONT/02_second_Racon_graphmap/assembly/{sample}_second_Racon_Assembly.fasta"
-    benchmark:
-        "../../benchmarks/polishing/{sample}_ONT_polishing.benchmark"
+        "../../results/final_assemblies/{sample}_assembly.fasta"
+    params:
+        fld = "../../results/final_assemblies"
     log:
-        "../../logs/ONT/polishing/{sample}_ONT_polishing.log"
-    conda:
-        "../envs/ONT_polishing.yaml"
-    threads: 4
+        "../../logs/final_assemblies/{sample}_assembly.fasta"
+    threads: 1
     resources:
         account = "pengel_general_data",
-        mem_mb = 2500,
-        runtime= "1h"
+        mem_mb = 1000,
+        runtime= "10m"
     shell:
-        "./ONT_polishing.sh {wildcards.sample} {input.ONT_reads} {input.ONT_asmbl} {output.fld}"
+        """
+        mkdir -p {params.fld};
+        sample={wildcards.sample};
+        sed "s/>/>$sample /" {input.fasta} > {output};
+        sed -i "s/ /_/g" {output}
+        """
 
-############################ Both ############################
+# Next we run checkM to assess the quality of the assemblies
 
-# Polish ONT assembly with Illumina reads
-# Do not forget to make script executable: chmod +x illumina_polishing.sh
-
-rule illumina_polishing:
+rule checkm:
     input:
-        ill_R1 = ILLUMINA_RAW + "/{sample}_R1.fastq.gz",
-        ill_R2 = ILLUMINA_RAW + "/{sample}_R2.fastq.gz",
-        fld = "../../results/ONT/polishing/{sample}_polishing_ONT",
-        ONT_asmbl = "../../results/ONT/polishing/{sample}_polishing_ONT/02_second_Racon_graphmap/assembly/{sample}_second_Racon_Assembly.fasta"
+        expand("../../results/final_assemblies/{sample}_assembly.fasta", sample = SAMPLES),
     output:
-        fld = directory("../../results/final_polishing/{sample}_polishing_illumina"),
-        file1 = "../../results/final_polishing/{sample}_polishing_illumina/03_first_pilon_bowtie2/assembly/{sample}_first_Pilon_Assembly.fasta",
-        file2 = "../../results/final_polishing/{sample}_polishing_illumina/04_second_pilon_bowtie2/assembly/{sample}_second_Pilon_Assembly.fasta",
-        file3 = "../../results/final_polishing/{sample}_polishing_illumina/05_third_pilon_bowtie2/assembly/{sample}_third_Pilon_Assembly.fasta"
-    benchmark:
-        "../../benchmarks/final_polishing/{sample}_illumina_polishing.benchmark"
+        fld = directory("../../results/checkm"),
+        rextended = "../../results/checkm/checkm_report_extended.txt"
+    params:
+        fld = "../../results/final_assemblies",
+        extension = "fasta",
+        tmpdir = "/scratch/mgarci14/checkm.tmp",
+        tmprep = "../../results/checkm/checkm_report_simple.txt",
+        lineage = "../../results/checkm/lineage.ms"
     log:
-        "../../logs/final_polishing/{sample}_illumina_polishing.log"
+        "../../logs/checkm.log"
     conda:
-        "../envs/illumina_polishing.yaml"
+        "../envs/checkm-1.2.2.yaml"
+    threads: 2
+    resources:
+        account = "pengel_general_data",
+        mem_mb = 100000,
+        runtime = "1h"
+    shell:
+        """
+        mkdir -p {params.tmpdir};
+        checkm lineage_wf -f {params.tmprep} --tab_table -x {params.extension} \
+        -t {threads} --tmpdir {params.tmpdir} {params.fld} {output.fld};
+        checkm qa -o 2 -f {output.rextended} --tab_table --tmpdir {params.tmpdir} \
+        -t {threads} {params.lineage} {output.fld};
+        rm {params.tmprep};
+        rm -rf {params.tmpdir}
+        """
+
+# TODO
+# - plot mapping coverage
+# - genome QC with quast?
+# - GTDB-Tk
+# - DRAM
+# - Defense finder
+# - barrnap
+# - RGI
+
+############################ Short reads mapping coverage ############################
+
+# Map Illumina reads to assembly (hybracter does not provide the bam file)
+
+rule map_Illumina:
+    input:
+        R1 = "../../results/Illumina/trimmed_reads/{sample}_R1.trim.fastq.gz",
+        R2 = "../../results/Illumina/trimmed_reads/{sample}_R2.trim.fastq.gz",
+        assembly = "../../results/final_assemblies/{sample}_assembly.fasta"
+    output:
+        bam = "../../results/Illumina_mapping/bams/{sample}_assembly_sorted.bam",
+        reads = "../../results/Illumina_mapping/read_mapping/{sample}_read_mapping.txt",
+        bases = "../../results/Illumina_mapping/per_base/{sample}_read_mapping_per_base.txt"
+    log:
+        "../../logs/Illumina_mapping/{sample}_bowtie2.log"
+    benchmark:
+        "../../benchmarks/Illumina_mapping/{sample}_bowtie2.benchmark"
+    params:
+        build = "../../results/Illumina_mapping/build/{sample}/{sample}"
+    conda:
+        "../envs/Illumina_mapping.yaml"
     threads: 12
     resources:
         account = "pengel_general_data",
-        mem_mb = 8000,
-        runtime= "1h"
+        mem_mb = 16000,
+        runtime = "3h"
     shell:
         """
-        (./illumina_polishing.sh {threads} {input.ONT_asmbl} \
-        {input.ill_R1} {input.ill_R2} {output.fld} {wildcards.sample}) 2> {log}
+        bowtie2-build --quiet {input.assembly} {params.build};
+        bowtie2 -1 {input.R1} -2 {input.R2} -x {params.build} --threads {threads} \
+        --local --very-sensitive-local | samtools sort -O BAM -o {output.bam};
+        samtools index {output.bam};
+        (samtools flagstat {output.bam} > {output.reads}) 2> {log};
+        (samtools depth -a {output.bam} > {output.bases}) 2> {log}
         """
 
-# rule assembly_QC:
-#     input:
-#         pilon3="../data/ONT_assembly/polishing/illumina/{sample}_polishing_illumina/05_third_pilon_bowtie2/assembly/{sample}_third_Pilon_Assembly.fasta",
-#         ONT="../data/ONT_assembly/{sample}_ONT_assembly/assembly.fasta",
-#         racon1="../data/ONT_assembly/polishing/ONT/{sample}_polishing_ONT/01_first_Racon_graphmap/assembly/{sample}_first_Racon_Assembly.fasta",
-#         racon2="../data/ONT_assembly/polishing/ONT/{sample}_polishing_ONT/02_second_Racon_graphmap/assembly/{sample}_second_Racon_Assembly.fasta",
-#         pilon1="../data/ONT_assembly/polishing/illumina/{sample}_polishing_illumina/03_first_pilon_bowtie2/assembly/{sample}_first_Pilon_Assembly.fasta",
-#         pilon2="../data/ONT_assembly/polishing/illumina/{sample}_polishing_illumina/04_second_pilon_bowtie2/assembly/{sample}_second_Pilon_Assembly.fasta"
-#     output:
-#         directory("../results/ONT_assembly/polishing_QC/{sample}_assembly_QC/")
-#     threads: 12
-#     log:
-#         "logs/ONT_assembly/polishing/quast/{sample}_assemblyQC.log"
-#     conda:
-#         "envs/quast.yaml"
-#     resources:
-#         account = "pengel_beemicrophage",
-#         mem_mb = 16000,
-#         runtime= "03:00:00"
-#     shell:
-#         "(quast.py \
-#         -l 'FlyeAssembly,first_ONT_racon,second_ONT_racon,first_Illumina_pilon,second_Illumina_pilon' \
-#         -R {input.pilon3} \
-#           {input.ONT} \
-#           {input.racon1} \
-#           {input.racon2} \
-#           {input.pilon1} \
-#           {input.pilon2} \
-#           -o  {output}) 2> {log}"
+rule parse_ONT_assembly_mapping:
+    input:
+        reads = expand("../../results/Illumina_mapping/read_mapping/{sample}_read_mapping.txt", sample = SAMPLES),
+        bases = expand("../../results/Illumina_mapping/per_base/{sample}_read_mapping_per_base.txt", sample = SAMPLES)
+    output:
+        all_reads = "../../results/Illumina_mapping/all_read_mapstats.txt",
+        all_bases = "../../results/Illumina_mapping/all_bases_cov.txt"
+    log:
+        "../../logs/Illumina_mapping/summary_mapping.log"
+    conda:
+        "../envs/R-4.3.2.yaml"
+    resources:
+        account = "pengel_general_data",
+        mem_mb = 6000,
+        runtime= "30m"
+    script:
+        "./parse_ONTassembly.R"
 
-# rule ONT_assembly_mapping:
-#         input:
-#             dir="../data/ONT_assembly/polishing/illumina/{sample}_polishing_illumina",
-#             bam="../data/ONT_assembly/polishing/illumina/{sample}_polishing_illumina/04_second_pilon_bowtie2/bowtie2/second_pilon_ONT2FinalAssembly_sorted.bam"
-#         output:
-#             map_reads="../results/ONT_assembly/polishing_QC/{sample}_assembly_QC/{sample}_mapping.txt",
-#             map_bases="../results/ONT_assembly/bases_cov/{sample}_read_mapping_per_base.txt"
-#         threads: 12
-#         log:
-#             "logs/ONT_assembly/polishing/mapping/{sample}_mapping.log"
-#         conda:
-#             "envs/illumina_polishing.yaml"
-#         resources:
-#             account = "pengel_beemicrophage",
-#             mem_mb = 16000,
-#             runtime= "03:00:00"
-#         shell:
-#             "(samtools flagstat {input.bam} > {output.map_reads}) 2> {log}; "
-#             "(samtools depth -a {input.bam} > {output.map_bases}) 2> {log}"
-
-# rule Parse_ONT_assembly_mapping:
-#     input:
-#         dir=expand("../data/ONT_assembly/polishing/illumina/{sample}_polishing_illumina",sample=config["samples"]),
-#         map_reads=expand("../results/ONT_assembly/polishing_QC/{sample}_assembly_QC/{sample}_mapping.txt", sample=config["samples"]),
-#         map_bases=expand("../results/ONT_assembly/bases_cov/{sample}_read_mapping_per_base.txt", sample=config["samples"])
-#     output:
-#         all_reads="../results/ONT_assembly/polishing_QC/all_mapstats.txt",
-#         all_bases="../results/ONT_assembly/bases_cov/all_bases_cov.txt"
-#     log:
-#         "logs/ONT_assembly/polishing/mapping/summary_mapping.log"
-#     conda:
-#         "envs/base_R_env.yaml"
-#     resources:
-#         account = "pengel_beemicrophage",
-#         mem_mb = 6000,
-#         runtime= "00:30:00"
-#     script:
-#         "scripts/post_assembly/parse_ONTassembly.R"
-
-# ################################################################################
-
-# ############################ ANNOTATION ##########################################
-# rule move_final_assemblies:
-#     input:
-#         asmbl=expand("../data/ONT_assembly/polishing/illumina/{sample}_polishing_illumina/05_third_pilon_bowtie2/assembly/{sample}_third_Pilon_Assembly.fasta", sample=config["samples"])
-#     output:
-#         db=directory("../resources/checkm_db"),
-#         dir=directory("../results/ONT_assembly/final_assemblies/")
-#     log:
-#         "logs/annot_QC/move_assemblies/move_assembly.log"
-#     resources:
-#         account = "pengel_beemicrophage",
-#         mem_mb = 6000,
-#         runtime= "00:30:00"
-#     shell:
-#         "mkdir -p {output.dir}; "
-#         "cp {input.asmbl} {output.dir}/"
-
-# rule checkm_QC:
-#     input:
-#         dir="../results/ONT_assembly/final_assemblies/",
-#     output:
-#         dir=directory("../results/ONT_assembly/checkm_QC/"),
-#         file="../results/ONT_assembly/checkm_QC/checkm_QC_stats.txt"
-#     log:
-#         "logs/annot_QC/checkm/checkm_QC.log"
-#     threads: 16
-#     conda:
-#         "envs/checkm_env.yaml"
-#     resources:
-#         account = "pengel_beemicrophage",
-#         mem_mb = 100000,
-#         runtime= "01:00:00"
-#     shell:
-#         # "checkm_db={output.db}; "
-#         # "echo ${{checkm_db}} | checkm data setRoot ${{checkm_db}}"
-#         "export CHECKM_DATA_PATH=../resources/checkm_db"
-#         "checkm lineage_wf {input.dir} {output.dir} -x .fasta -t {threads}; "
-#         "checkm qa {output.dir}/lineage.ms {output.dir} -o 2 -f {output.file} --tab_table"
+############################ ANNOTATION ##########################################
 
 # rule checkm_plots:
 #     input:
