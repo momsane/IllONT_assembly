@@ -47,7 +47,7 @@ Note: the resources directive in each rule of the snakefile is written for execu
 ```
 
 2. Clone this repository in /workflow.
-3. Download and uncompress all required databases (CheckM, GTDB-Tk).
+3. Download and uncompress all required databases (CheckM, GTDB-Tk, DRAM).
 4. Set up the metadata.tsv file in /config with the following columns:
 - sample
 - Illumina_avail: 1 if Illumina reads are available, 0 if not
@@ -60,7 +60,8 @@ If snakemake raises issues with conflicting versions when creating the conda env
 Check points requiring manual input:
 - after running fastqc, add column 'Illumina_adapter' to metadata.tsv file indicating which adapter was found in each sample
 - if hybracter cannot assemble a genome of size somewhat close to the estimated_genome_size, it will exit without producing an output, which will cause snakemake to consider it as failed. You need to check the log file.
-- after running hybracter (including failure of some samples), add column 'include_downstream' to metadata.tsv file indicating if you wish to pursue the analysis of each assembly (1) or not (0). Things you might want to consider: whether hybracter could actually assemble something, and whether the assembly is complete or not. Then update the SAMPLES variable in the snakefile. If you excluded some samples, snakemake will want to rerun some rules because the sample set has changed. Comment all requested inputs in rule all after "# Global stats" and run the snakefile with the "--touch" option. Or skip this step if you have already copied the outputs that would be changed to another repository. This is a bit messy but it's the only I have found to handle failing samples without spending too much time.
+- after running hybracter (including failure of some samples), add column 'complete' to metadata.tsv file indicating if hybracter flagged the genome as complete (1) or incomplete (0) (no output counts as incomplete).
+- after running the genomes QC until CheckM, add column 'include_downstream' if you wish to pursue the analysis of the genome (1) or not (0). If the genomes is less than 95% complete (CheckM) it is not worth it.
 
 ## Contributions
 

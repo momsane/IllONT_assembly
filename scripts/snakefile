@@ -1,5 +1,5 @@
-#command to symlink scratch: ln -s /scratch/mgarci14 ../../results/scratch
 #wd=/work/FAC/FBM/DMF/pengel/general_data/syncom_ONT_seq/workflow/scripts
+#command to symlink scratch: ln -s /scratch/mgarci14 ../../results/scratch
 #workflow = scripts, envs, config
 #data
 #results
@@ -20,10 +20,10 @@ import pandas as pd
 #Read config file
 metadata = pd.read_table(config_file, sep='\t', header=0).set_index('sample', drop = False)
 
-#List samples
-# SAMPLES = metadata['sample'].tolist()
-# SAMPLES = metadata.loc[metadata['Illumina_avail'] == 1, 'sample'].tolist()
-SAMPLES = metadata.loc[(metadata['Illumina_avail'] == 1) & (metadata['include_downstream'] == 1), 'sample'].tolist()
+#List samples to include for the read pre-processing and assembly
+SAMPLES_ASS = metadata.loc[metadata['Illumina_avail'] == 1, 'sample'].tolist()
+#List samples to include for the downstream genome analysis
+SAMPLES_ANNOT = metadata.loc[(metadata['Illumina_avail'] == 1) & (metadata['include_downstream'] == 1), 'sample'].tolist()
 
 # Put here the paths to the raw reads folders on the cluster
 ILLUMINA_RAW = "../../data/raw_Illumina_reads"
@@ -31,25 +31,23 @@ ONT_RAW = "../../data/raw_ONT_reads"
 
 rule all:
     input:
-        # Illumina reads pre-processing
+        # First chunk: Illumina reads QC
         "../../results/Illumina/check_integrity/integrity_files.txt",
         "../../results/Illumina/count_reads_bt/count_reads_bt.txt",
         "../../results/Illumina/fastqc_pretrim/all",
+        # Second chunk: Illumina reads adapter trimming, ONT reads pre-processing and assembly
         "../../results/Illumina/fastqc_posttrim/all",
-        # ONT reads pre-processing
-        # "../../results/ONT/check_integrity/integrity_files.txt"
+        "../../results/ONT/check_integrity/integrity_files.txt",
         expand("../../results/ONT/readstats_{stage}/readstats_{stage}_all.txt", stage = ["bf", "af"]),
-        # Hybracter: assembly and polishing
         "../../results/hybracter/test",
-        expand("../../results/hybracter/{sample}_hybracter", sample = SAMPLES),
-        # Global stats
-        "../../results/hybracter/hybracter_summary_all.tsv",
-        "../../results/assembly/samples_assembly_stats.txt",
-        expand("../../results/assembly/bandage/{sample}_assembly_graph.jpg", sample = SAMPLES),
-        expand("../../results/final_assemblies/{sample}_assembly.fasta", sample = SAMPLES),
-        "../../results/checkm",
-        # Illumina mapping stats
-        "../../results/Illumina_mapping/all_read_mapstats.txt"
+        expand("../../results/hybracter/{sample}_hybracter", sample = SAMPLES_ASS),
+        # "../../results/hybracter/hybracter_summary_all.tsv",
+        # "../../results/assembly/samples_assembly_stats.txt",
+        # expand("../../results/assembly/bandage/{sample}_assembly_graph.jpg", sample = SAMPLES_ASS),
+        # expand("../../results/final_assemblies/{sample}_assembly.fasta", sample = SAMPLES_ASS),
+        # "../../results/checkm",
+        # Third chunk: polishing QC & genome analysis
+        # "../../results/Illumina_mapping/all_read_mapstats.txt"
 
 # The pipeline assumes the reads from different lanes are already
 # concatenated into a single file for both Illumina and ONT reads
@@ -69,6 +67,8 @@ rule gzip_test_Illumina:
         R2 = ILLUMINA_RAW + "/{sample}_R2.fastq.gz",
     output:
         "../../results/Illumina/check_integrity/samples/{sample}.txt"
+    log:
+        "../../logs/Illumina/check_integrity/{sample}.log"
     threads: 1
     resources:
         account = "pengel_general_data",
@@ -93,9 +93,11 @@ rule gzip_test_Illumina:
 
 rule check_integrity:
     input:
-        expand("../../results/{platform}/check_integrity/samples/{sample}.txt", sample = SAMPLES, platform = "{platform}")
+        expand("../../results/{platform}/check_integrity/samples/{sample}.txt", sample = SAMPLES_ASS, platform = "{platform}")
     output:
         "../../results/{platform}/check_integrity/integrity_files.txt"
+    log:
+        "../../logs/{platform}/check_integrity/all.log"
     threads: 1
     resources:
         account = "pengel_general_data",
@@ -138,7 +140,7 @@ rule count_reads_bt:
 
 rule combine_readcounts_bt:
     input:
-        expand("../../results/Illumina/count_reads_bt/samples/count_reads_bt_{sample}.txt", sample = SAMPLES)
+        expand("../../results/Illumina/count_reads_bt/samples/count_reads_bt_{sample}.txt", sample = SAMPLES_ASS)
     output:
         "../../results/Illumina/count_reads_bt/count_reads_bt.txt"
     log:
@@ -179,7 +181,7 @@ rule fastqc_bt:
 
 rule multiqc_fastqc_bt:
     input:
-        expand("../../results/Illumina/fastqc_pretrim/samples/{sample}", sample = SAMPLES)
+        expand("../../results/Illumina/fastqc_pretrim/samples/{sample}", sample = SAMPLES_ASS)
     output:
         directory("../../results/Illumina/fastqc_pretrim/all")
     conda:
@@ -283,7 +285,7 @@ rule fastqc_pt:
 
 rule multiqc_fastqc_pt:
     input:
-        expand("../../results/Illumina/fastqc_posttrim/samples/{sample}", sample = SAMPLES)
+        expand("../../results/Illumina/fastqc_posttrim/samples/{sample}", sample = SAMPLES_ASS)
     output:
         directory("../../results/Illumina/fastqc_posttrim/all")
     conda:
@@ -356,7 +358,7 @@ rule readstats_bf:
 
 rule combine_readstats:
     input:
-        expand("../../results/ONT/readstats_{stage}/samples/readstats_{stage}_{sample}.txt", sample = SAMPLES, stage = "{stage}")
+        expand("../../results/ONT/readstats_{stage}/samples/readstats_{stage}_{sample}.txt", sample = SAMPLES_ASS, stage = "{stage}")
     output:
         "../../results/ONT/readstats_{stage}/readstats_{stage}_all.txt"
     log:
@@ -470,10 +472,12 @@ rule readstats_af:
 
 rule init_hybracter:
     input:
-        expand("../../results/ONT/filtered_reads/{sample}_ONT_filtered.fastq.gz", sample = SAMPLES)
+        expand("../../results/ONT/filtered_reads/{sample}_ONT_filtered.fastq.gz", sample = SAMPLES_ASS)
     output:
         install = directory("../../results/hybracter/installation"),
         test = directory("../../results/hybracter/test")
+    params:
+        config = "../config/config_hybracter.yaml"
     log:
         "../../logs/hybracter/init.log"
     threads: 1
@@ -481,12 +485,12 @@ rule init_hybracter:
         "../envs/hybracter-0.9.0.yaml"
     resources:
         account = "pengel_general_data",
-        mem_mb = 1000,
-        runtime= "2h"
+        mem_mb = 8000,
+        runtime= "30m"
     shell:
         """
-        hybracter install -o {output.install};
-        hybracter test-hybrid -o {output.test}
+        hybracter install --configfile {params.config} -o {output.install};
+        hybracter test-hybrid --configfile {params.config} -o {output.test}
         """
 
 def get_size(wildcards):
@@ -495,6 +499,8 @@ def get_size(wildcards):
 
 rule hybracter:
     input:
+        install = "../../results/hybracter/installation",
+        test = "../../results/hybracter/test",
         filtered_ont = "../../results/ONT/filtered_reads/{sample}_ONT_filtered.fastq.gz",
         R1 = "../../results/Illumina/trimmed_reads/{sample}_R1.trim.fastq.gz",
         R2 = "../../results/Illumina/trimmed_reads/{sample}_R2.trim.fastq.gz"
@@ -502,7 +508,8 @@ rule hybracter:
         fld = directory("../../results/hybracter/{sample}_hybracter"),
         summary = "../../results/hybracter/{sample}_hybracter/FINAL_OUTPUT/hybracter_summary.tsv"
     params:
-        size = get_size
+        size = get_size,
+        config = "../config/config_hybracter.yaml"
     benchmark:
         "../../benchmarks/hybracter/{sample}_hybracter.benchmark"
     log:
@@ -516,7 +523,7 @@ rule hybracter:
         runtime= "5h"
     shell:
         """
-        hybracter hybrid-single -l {input.filtered_ont} \
+        hybracter hybrid-single --configfile {params.config} -l {input.filtered_ont} \
         -1 {input.R1} -2 {input.R2} \
         -s {wildcards.sample} -c {params.size} -o {output} \
         -t {threads} --skip_qc --logic best
@@ -531,8 +538,8 @@ rule hybracter:
 
 rule hybracter_summary:
     input:
-        fld = expand("../../results/hybracter/{sample}_hybracter", sample = SAMPLES),
-        summaries = expand("../../results/hybracter/{sample}_hybracter/FINAL_OUTPUT/hybracter_summary.tsv", sample = SAMPLES)
+        fld = expand("../../results/hybracter/{sample}_hybracter", sample = SAMPLES_ASS),
+        summaries = expand("../../results/hybracter/{sample}_hybracter/FINAL_OUTPUT/hybracter_summary.tsv", sample = SAMPLES_ASS)
     output:
         "../../results/hybracter/hybracter_summary_all.tsv"
     log:
@@ -552,8 +559,8 @@ rule hybracter_summary:
 
 rule flye_assembly_stats:
     input:
-        fld = expand("../../results/hybracter/{sample}_hybracter", sample = SAMPLES),
-        stats = expand("../../results/hybracter/{sample}_hybracter/supplementary_results/flye_individual_summaries/{sample}_assembly_info.txt", sample = SAMPLES)
+        fld = expand("../../results/hybracter/{sample}_hybracter", sample = SAMPLES_ASS),
+        stats = expand("../../results/hybracter/{sample}_hybracter/supplementary_results/flye_individual_summaries/{sample}_assembly_info.txt", sample = SAMPLES_ASS)
     output:
         "../../results/assembly/samples_assembly_stats.txt"
     log:
@@ -579,10 +586,11 @@ rule flye_assembly_stats:
 
 rule bandage_assembly:
     input:
-        fld = "../../results/hybracter/{sample}_hybracter",
-        graph = "../../results/hybracter/{sample}_hybracter/processing/assemblies/{sample}/assembly_graph.gfa"
+        fld = "../../results/hybracter/{sample}_hybracter"
     output:
         "../../results/assembly/bandage/{sample}_assembly_graph.jpg"
+    params:
+        graph = "../../results/hybracter/{sample}_hybracter/processing/assemblies/{sample}/assembly_graph.gfa"
     log:
         "../../logs/assembly/{sample}_assembly_graph.log"
     conda:
@@ -593,7 +601,10 @@ rule bandage_assembly:
         mem_mb = 2000,
         runtime= "1h"
     shell:
-        "Bandage image {input.graph} {output}"
+        "Bandage image {params.graph} {output}"
+
+# After this check the hybracter output and genome QC outputs and indicate in the metadata file
+# whether the assembly seems complete or not
 
 # Rename contigs to have sample name, replace " " by "_"
 # and put all complete assemblies in a single folder
@@ -606,12 +617,12 @@ def get_fasta(wildcards):
 
 rule final_assemblies:
     input:
-        fld = "../../results/hybracter/{sample}_hybracter",
-        fasta = get_fasta
+        fld = "../../results/hybracter/{sample}_hybracter"
     output:
         "../../results/final_assemblies/{sample}_assembly.fasta"
     params:
-        fld = "../../results/final_assemblies"
+        fld = "../../results/final_assemblies",
+        fasta = get_fasta
     log:
         "../../logs/final_assemblies/{sample}_assembly.fasta"
     threads: 1
@@ -623,7 +634,7 @@ rule final_assemblies:
         """
         mkdir -p {params.fld};
         sample={wildcards.sample};
-        sed "s/>/>$sample /" {input.fasta} > {output};
+        sed "s/>/>$sample /" {params.fasta} > {output};
         sed -i "s/ /_/g" {output}
         """
 
@@ -631,14 +642,14 @@ rule final_assemblies:
 
 rule checkm:
     input:
-        expand("../../results/final_assemblies/{sample}_assembly.fasta", sample = SAMPLES),
+        expand("../../results/final_assemblies/{sample}_assembly.fasta", sample = SAMPLES_ASS),
     output:
         fld = directory("../../results/checkm"),
         rextended = "../../results/checkm/checkm_report_extended.txt"
     params:
         fld = "../../results/final_assemblies",
         extension = "fasta",
-        tmpdir = "/scratch/mgarci14/checkm.tmp",
+        tmpdir = "../../results/scratch/checkm.tmp",
         tmprep = "../../results/checkm/checkm_report_simple.txt",
         lineage = "../../results/checkm/lineage.ms"
     log:
@@ -660,6 +671,10 @@ rule checkm:
         rm {params.tmprep};
         rm -rf {params.tmpdir}
         """
+
+# Check the checkM output to see if the genomes seem complete
+# From here only complete genomes will be further processed
+
 
 # TODO
 # - plot mapping coverage
@@ -708,8 +723,8 @@ rule map_Illumina:
 
 rule parse_ONT_assembly_mapping:
     input:
-        reads = expand("../../results/Illumina_mapping/read_mapping/{sample}_read_mapping.txt", sample = SAMPLES),
-        bases = expand("../../results/Illumina_mapping/per_base/{sample}_read_mapping_per_base.txt", sample = SAMPLES)
+        reads = expand("../../results/Illumina_mapping/read_mapping/{sample}_read_mapping.txt", sample = SAMPLES_ANNOT),
+        bases = expand("../../results/Illumina_mapping/per_base/{sample}_read_mapping_per_base.txt", sample = SAMPLES_ANNOT)
     output:
         all_reads = "../../results/Illumina_mapping/all_read_mapstats.txt",
         all_bases = "../../results/Illumina_mapping/all_bases_cov.txt"

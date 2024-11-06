@@ -1,0 +1,26 @@
+executor: cluster-generic
+cluster-generic-submit-cmd:
+ mkdir -p logs/{rule} &&
+ sbatch
+   --nodes=1
+   --cpus-per-task={threads}
+   --time={resources.time}
+   --job-name=smk-{rule}
+   --parsable
+   --output=logs/{rule}/{jobid}.out
+   --error=logs/{rule}/{jobid}.err
+#cluster-generic-status-cmd: ~/.config/snakemake/slurm/slurm_status.py
+cluster-generic-cancel-cmd: scancel
+default-resources:
+ - time=1320
+jobs: 200
+latency-wait: 30
+local-cores: 8
+restart-times: 1
+max-jobs-per-second: 2
+max-status-checks-per-second: 10
+local-cores: 8
+software-deployment-method: conda
+rerun-incomplete: True
+printshellcmds: True
+scheduler: greedy
