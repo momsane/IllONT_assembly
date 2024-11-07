@@ -20,9 +20,9 @@ The following tools installed in their own conda environment:
 - filtlong v0.2.1
 - hybracter v.0.9.0
 - bandage v0.8.1 
-# - quast v5.2.0
+
 - checkm v1.2.2 with the database downloaded, decompressed and dearchived. The path to this database must be put in the environment yaml file at the end, so that it is stored in an environment variable.
-- gtdb-tk v2.3.2 with the database downloaded and decompressed. The path to this database must be put in the environment yaml file at the end, so that it is stored in an environment variable.
+- gtdb-tk v2.4.0 with the database downloaded and decompressed. The path to this database must be put in the environment yaml file at the end, so that it is stored in an environment variable.
 
 All environment YAML files can be found in /envs.
 
@@ -59,9 +59,11 @@ If snakemake raises issues with conflicting versions when creating the conda env
 
 Check points requiring manual input:
 - after running fastqc, add column 'Illumina_adapter' to metadata.tsv file indicating which adapter was found in each sample
-- if hybracter cannot assemble a genome of size somewhat close to the estimated_genome_size, it will exit without producing an output, which will cause snakemake to consider it as failed. You need to check the log file.
-- after running hybracter (including failure of some samples), add column 'complete' to metadata.tsv file indicating if hybracter flagged the genome as complete (1) or incomplete (0) (no output counts as incomplete).
-- after running the genomes QC until CheckM, add column 'include_downstream' if you wish to pursue the analysis of the genome (1) or not (0). If the genomes is less than 95% complete (CheckM) it is not worth it.
+- if hybracter cannot assemble contigs, it will exit without producing an output, which will cause snakemake to consider it as failed. You need to check the log file.
+- if hybracter cannot assemble a genome of size somewhat close to the estimated_genome_size, it will flag the output as incomplete.
+- after running hybracter, add column 'genome_assembled' to metadata.tsv file indicating if hybracter could assemble a genome (1) or not (0) 
+- in rule all, comment the line requesting the hybracter output for all samples, otherwise snakemake will keep trying to run hybracter on the samples for which contigs cannot be assembled
+- after running the genomes QC until CheckM, add column 'include_downstream' to indicate if you wish to pursue the analysis of the genome (1) or not (0). If the genome is less than 95% complete (CheckM) it might not be worth it.
 
 ## Contributions
 
