@@ -1,30 +1,31 @@
 {
   "search_databases": {
     "kegg": null,
-    "kofam_hmm": "/work/FAC/FBM/DMF/pengel/general_data/databases/DRAM/DRAM_database/kofam_profiles.hmm",
-    "kofam_ko_list": "/work/FAC/FBM/DMF/pengel/general_data/databases/DRAM/DRAM_database/kofam_ko_list.tsv",
-    "uniref": "/work/FAC/FBM/DMF/pengel/general_data/databases/DRAM/DRAM_database/uniref90.20230530.mmsdb",
-    "pfam": "/work/FAC/FBM/DMF/pengel/general_data/databases/DRAM/DRAM_database/pfam.mmspro",
-    "dbcan": "/work/FAC/FBM/DMF/pengel/general_data/databases/DRAM/DRAM_database/dbCAN-HMMdb-V11.txt",
-    "viral": "/work/FAC/FBM/DMF/pengel/general_data/databases/DRAM/DRAM_database/refseq_viral.20230530.mmsdb",
-    "peptidase": "/work/FAC/FBM/DMF/pengel/general_data/databases/DRAM/DRAM_database/peptidases.20230530.mmsdb",
-    "vogdb": "/work/FAC/FBM/DMF/pengel/general_data/databases/DRAM/DRAM_database/vog_latest_hmms.txt"
+    "kofam_hmm": "/reference/dram_20230610/kofam_profiles.hmm",
+    "kofam_ko_list": "/reference/dram_20230610/kofam_ko_list.tsv",
+    "uniref": "/reference/dram_20230610/uniref90.20230610.mmsdb",
+    "pfam": "/reference/dram_20230610/pfam.mmspro",
+    "dbcan": "/reference/dram_20230610/dbCAN-HMMdb-V11.txt",
+    "viral": "/reference/dram_20230610/refseq_viral.20230610.mmsdb",
+    "peptidase": "/reference/dram_20230610/peptidases.20230610.mmsdb",
+    "vogdb": "/reference/dram_20230610/vog_latest_hmms.txt"
   },
+  "custom_dbs": null,
   "database_descriptions": {
-    "pfam_hmm": "/work/FAC/FBM/DMF/pengel/general_data/databases/DRAM/DRAM_database/Pfam-A.hmm.dat.gz",
-    "dbcan_fam_activities": "/work/FAC/FBM/DMF/pengel/general_data/databases/DRAM/DRAM_database/CAZyDB.08062022.fam-activities.txt",
-    "dbcan_subfam_ec": "/work/FAC/FBM/DMF/pengel/general_data/databases/DRAM/DRAM_database/CAZyDB.08062022.fam.subfam.ec.txt",
-    "vog_annotations": "/work/FAC/FBM/DMF/pengel/general_data/databases/DRAM/DRAM_database/vog_annotations_latest.tsv.gz"
+    "pfam_hmm": "/reference/dram_20230610/Pfam-A.hmm.dat.gz",
+    "dbcan_fam_activities": "/reference/dram_20230610/CAZyDB.08062022.fam-activities.txt",
+    "dbcan_subfam_ec": "/reference/dram_20230610/CAZyDB.08062022.fam.subfam.ec.txt",
+    "vog_annotations": "/reference/dram_20230610/vog_annotations_latest.tsv.gz"
   },
   "dram_sheets": {
-    "genome_summary_form": "/work/FAC/FBM/DMF/pengel/general_data/databases/DRAM/DRAM_database/genome_summary_form.20230530.tsv",
-    "module_step_form": "/work/FAC/FBM/DMF/pengel/general_data/databases/DRAM/DRAM_database/module_step_form.20230530.tsv",
-    "etc_module_database": "/work/FAC/FBM/DMF/pengel/general_data/databases/DRAM/DRAM_database/etc_mdoule_database.20230530.tsv",
-    "function_heatmap_form": "/work/FAC/FBM/DMF/pengel/general_data/databases/DRAM/DRAM_database/function_heatmap_form.20230530.tsv",
-    "amg_database": "/work/FAC/FBM/DMF/pengel/general_data/databases/DRAM/DRAM_database/amg_database.20230530.tsv"
+    "genome_summary_form": "/reference/dram_20230610/genome_summary_form.20230610.tsv",
+    "module_step_form": "/reference/dram_20230610/module_step_form.20230610.tsv",
+    "etc_module_database": "/reference/dram_20230610/etc_mdoule_database.20230610.tsv",
+    "function_heatmap_form": "/reference/dram_20230610/function_heatmap_form.20230610.tsv",
+    "amg_database": "/reference/dram_20230610/amg_database.20230610.tsv"
   },
-  "dram_version": "1.4.6",
-  "description_db": "/work/FAC/FBM/DMF/pengel/general_data/databases/DRAM/DRAM_database/description_db.sqlite",
+  "description_db": "/reference/dram_20230610/description_db.sqlite",
+  "dram_version": "1.4.0",
   "setup_info": {
     "kofam_hmm": {
       "name": "KOfam db",
