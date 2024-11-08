@@ -1,4 +1,6 @@
+scripts/.Rhistory
+.DS_Store
+scripts/.DS_Store
 scripts/checkm.sh
 scripts/gtdbtk.sh
-.DS_Store
 scripts/raw_reads_stats.sh
