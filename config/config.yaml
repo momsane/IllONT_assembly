@@ -1,0 +1,3 @@
+Illumina_raw: "/work/FAC/FBM/DMF/pengel/general_data/syncom_ONT_seq/data/raw_Illumina_reads"
+ONT_raw: "/work/FAC/FBM/DMF/pengel/general_data/syncom_ONT_seq/data/raw_ONT_reads"
+Mash_db: "/work/FAC/FBM/DMF/pengel/general_data/mgarci14/release220/mash/gtdb_ref_sketch.msh"
