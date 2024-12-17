@@ -5,8 +5,8 @@ This repository contains all the scripts and conda environments to assemble high
 ## Installation
 
 Requirements:
-- conda v23.10.0
-- mamba v1.5.6\
+- conda version >= 23.10.0
+- mamba version >= 1.5.6\
 The following tools installed in their own conda environment:
 - snakemake v7.32.4
 - R v.4.3.2
@@ -20,9 +20,12 @@ The following tools installed in their own conda environment:
 - filtlong v0.2.1
 - hybracter v.0.9.0
 - bandage v0.8.1 
-
+- samtools v1.21 + bowtie2 v2.5.4 (Illumina_mapping.yaml
 - checkm v1.2.2 with the database downloaded, decompressed and dearchived. The path to this database must be put in the environment yaml file at the end, so that it is stored in an environment variable.
 - gtdb-tk v2.4.0 with the database downloaded and decompressed. The path to this database must be put in the environment yaml file at the end, so that it is stored in an environment variable.
+- dram v1.4.6
+- macsyfinder v2.1.4
+- rgi v6.0.3
 
 All environment YAML files can be found in /envs.
 
@@ -46,14 +49,16 @@ Note: the resources directive in each rule of the snakefile is written for execu
 └─── workflow
 ```
 
-2. Clone this repository in /workflow.
-3. Download and uncompress all required databases (CheckM, GTDB-Tk, DRAM).
-4. Set up the metadata.tsv file in /config with the following columns:
+2. Clone this repository in workflow.
+3. Move the adapters folder to data.
+3. Make sure you have all required databases downloaded and uncompressed (CheckM, GTDB-Tk, DRAM).
+4. Set up the metadata.tsv file in config with the following columns:
 - sample
 - Illumina_avail: 1 if Illumina reads are available, 0 if not
 - estimated_genome_size in bp
-5. Upload raw Illumina and ONT reads to /data and add the paths to the snakefile.
-6. Activate your snakemake conda environment and run the snakefile.
+5. If needed, concatenate the files from different lanes into a single file for each sample (or two files for Illumina) using scripts/concat_fastq.sh.
+6. Upload raw Illumina and ONT reads to data and add the paths to config/config.yaml.
+7. Activate your snakemake conda environment and run the snakefile.
 
 If snakemake raises issues with conflicting versions when creating the conda environments, it helps to (temporarily) set the channel priority to flexible.
 
@@ -67,3 +72,4 @@ Check points requiring manual input:
 
 ## Contributions
 
+This pipeline was built by Meline Garcia using previous work from Malick N'Diaye.

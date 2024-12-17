@@ -51,7 +51,13 @@ rule all:
         "../../results/Illumina_mapping/all_read_mapstats.txt",
         "../../results/checkm_plots",
         "../../results/gtdbtk_classify",
-        expand("../../results/annotation/DRAM_mainoutputs/{sample}", sample = SAMPLES_ANNOT)
+        expand("../../results/annotation/DRAM/{sample}_DRAM", sample = SAMPLES_ANNOT),
+        expand("../../results/annotation/rRNAS/{sample}_16S.fna", sample = SAMPLES_ANNOT),
+        expand("../../results/annotation/RGI/{sample}/{sample}_RGI_filtered.txt", sample = SAMPLES_ANNOT),
+        expand("../../results/annotation/macsyfinder/{sample}", sample = SAMPLES_ANNOT)
+        ## Test ##
+        # "../../results/annotation/defense-finder/ESL0309"
+        
 
 # The pipeline assumes the reads from different lanes are already
 # concatenated into a single file 
@@ -118,9 +124,8 @@ rule count_reads_bt:
         R1 = config["Illumina_raw"] + "/{sample}_R1.fastq.gz",
         R2 = config["Illumina_raw"] + "/{sample}_R2.fastq.gz",
     output:
-        "../../results/Illumina/count_reads_bt/samples/count_reads_bt_{sample}.txt"
-    params:
-        tmp = "../../results/Illumina/count_reads_bt/samples/count_reads_bt_{sample}.temp.txt"
+        tmp = temp("../../results/Illumina/count_reads_bt/samples/count_reads_bt_{sample}.temp.txt"),
+        final = "../../results/Illumina/count_reads_bt/samples/count_reads_bt_{sample}.txt"
     conda:
         "../envs/seqkit-2.6.1.yaml"
     log:
@@ -132,11 +137,10 @@ rule count_reads_bt:
         mem_mb = 2000
     shell:
         """ 
-        seqkit stats -T -b -e {input.R1} > {params.tmp};
-        seqkit stats -T -b -e {input.R2} >> {params.tmp};
-        cat {params.tmp} | awk -v sample={wildcards.sample} 'NR == 2 {{print sample"\tR1\t"$0}}' > {output};
-        cat {params.tmp} | awk -v sample={wildcards.sample} 'NR == 2 {{print sample"\tR2\t"$0}}' >> {output};
-        rm {params.tmp}
+        seqkit stats -T -b -e {input.R1} > {output.tmp};
+        seqkit stats -T -b -e {input.R2} >> {output.tmp};
+        cat {output.tmp} | awk -v sample={wildcards.sample} 'NR == 2 {{print sample"\tR1\t"$0}}' > {output.final};
+        cat {output.tmp} | awk -v sample={wildcards.sample} 'NR == 2 {{print sample"\tR2\t"$0}}' >> {output.final}
         """
 
 # Combining all the samples stats into one file 
@@ -225,7 +229,7 @@ def determine_k(wildcards):
         return 31 
 
 # hdist is set to 2 to allow for 2 mismatches in the adapter sequence
-# which more stringent than the default of 1
+# which is more stringent but safer than the default of 1
 
 rule bbduk_adapt:
     input:
@@ -305,6 +309,7 @@ rule multiqc_fastqc_pt:
     shell:
         "multiqc --interactive -f --ignore {params.ignore} -o {output} {input}"
 
+        
 ############################ ONT reads processing ############################
 
 # File names should be something like: {sample}.fastq.gz
@@ -479,6 +484,8 @@ def get_size(wildcards):
     size = metadata.loc[metadata['sample'] == wildcards.sample, 'estimated_genome_size'].item()
     return int(size)
 
+# a configfile is used to tell snakemake (hybracter uses snakemake >=8) to use the slurm plugin
+
 rule hybracter:
     input:
         install = "../../results/hybracter/installation",
@@ -488,7 +495,9 @@ rule hybracter:
         R2 = "../../results/Illumina/trimmed_reads/{sample}_R2.trim.fastq.gz"
     output:
         fld = directory("../../results/hybracter/{sample}_hybracter"),
-        summary = "../../results/hybracter/{sample}_hybracter/FINAL_OUTPUT/hybracter_summary.tsv"
+        summary = "../../results/hybracter/{sample}_hybracter/FINAL_OUTPUT/hybracter_summary.tsv",
+        stats = "../../results/hybracter/{sample}_hybracter/supplementary_results/flye_individual_summaries/{sample}_assembly_info.txt",
+        graph = "../../results/hybracter/{sample}_hybracter/processing/assemblies/{sample}/assembly_graph.gfa"
     params:
         size = get_size,
         config = "../config/config_hybracter.yaml"
@@ -568,11 +577,9 @@ rule flye_assembly_stats:
 
 rule bandage_assembly:
     input:
-        fld = "../../results/hybracter/{sample}_hybracter"
+        "../../results/hybracter/{sample}_hybracter/processing/assemblies/{sample}/assembly_graph.gfa"
     output:
         "../../results/assembly/bandage/{sample}_assembly_graph.jpg"
-    params:
-        graph = "../../results/hybracter/{sample}_hybracter/processing/assemblies/{sample}/assembly_graph.gfa"
     log:
         "../../logs/assembly/{sample}_assembly_graph.log"
     conda:
@@ -583,7 +590,7 @@ rule bandage_assembly:
         mem_mb = 2000,
         runtime= "2h"
     shell:
-        "Bandage image {params.graph} {output}"
+        "Bandage image {input} {output}"
 
 # After this check the hybracter output and genome QC outputs and indicate in the metadata file
 # whether the assembly seems complete or not
@@ -599,7 +606,7 @@ def get_fasta(wildcards):
 
 rule final_assemblies:
     input:
-        fld = "../../results/hybracter/{sample}_hybracter"
+        "../../results/hybracter/{sample}_hybracter"
     output:
         "../../results/final_assemblies/{sample}.fna"
     params:
@@ -643,7 +650,7 @@ rule final_assemblies_nosample:
         """
         mkdir -p {params.fld};
         sed -e "s/=/_/g" -e "s/ /_/g" {params.fasta} > {output.tmp};
-        awk -f {input.awk_script} {output.tmp} > {output.fna}
+        awk -f {input.awk_script} {output.tmp} | tr -s '\n' > {output.fna}
         """
 
 # Next we run checkM to assess the quality of the assemblies
@@ -742,12 +749,12 @@ rule parse_ONT_assembly_mapping:
 
 rule checkm_plots:
     input:
-        assemblies = expand("../../results/assembly/spades/contigs_filtered/{sample}.fna", sample = SAMPLES_ANNOT),
-        dir_asmbl = "../../results/final_assemblies",
+        assemblies = expand("../../results/final_assemblies/{sample}.fna", sample = SAMPLES_ANNOT),
         dir_checkm = "../../results/checkm"
     output:
         fld = directory("../../results/checkm_plots")
     params:
+        dir_asmbl = "../../results/final_assemblies",
         extension = "fna"
     benchmark:
         "../../benchmarks/checkm_plots.benchmark"
@@ -761,15 +768,18 @@ rule checkm_plots:
         mem_mb = 2000,
         runtime= "20m"
     shell:
-        "checkm marker_plot {input.dir_checkm} {input.dir_asmbl} {output.fld} -x {params.extension} --image_type svg; "
-        "checkm coding_plot {input.dir_checkm} {input.dir_asmbl} {output.fld} 0 -x {params.extension} --image_type svg; "
-        "checkm gc_plot {input.dir_asmbl} {output.fld} 0 -x {params.extension} --image_type svg"
+        """
+        checkm marker_plot {input.dir_checkm} {params.dir_asmbl} {output.fld} -x {params.extension} --image_type svg;
+        checkm coding_plot {input.dir_checkm} {params.dir_asmbl} {output.fld} 0 -x {params.extension} --image_type svg;
+        checkm gc_plot {params.dir_asmbl} {output.fld} 0 -x {params.extension} --image_type svg;
+        checkm nx_plot {params.dir_asmbl} {output.fld} -x {params.extension} --image_type svg
+        """
 
 ############################ Classification & annotation ##########################################
 
 rule gtdb_classify:
     input:
-        "../../results/final_assemblies"
+        expand("../../results/final_assemblies/{sample}.fna", sample = SAMPLES_ANNOT)
     output:
         fld = directory("../../results/gtdbtk_classify"),
         report = "../../results/gtdbtk_classify/classify/gtdbtk.bac120.summary.tsv"
@@ -778,6 +788,7 @@ rule gtdb_classify:
     benchmark:
         "../../benchmarks/gtdbtk_classify.benchmark"
     params:
+        dir_asmbl = "../../results/final_assemblies",
         extension = "fna",
         mashdb = config["Mash_db"],
         tmpdir = "../../results/scratch/gtdbtk_classify/",
@@ -788,115 +799,228 @@ rule gtdb_classify:
     resources:
         account = "pengel_general_data",
         mem_mb = 20000,
-        runtime = "1h"
+        runtime = "6h" # increase if you have a lot of genomes or genomes from poorly characterized clades
     shell:
         """
         mkdir -p {params.tmpdir};
-        gtdbtk classify_wf --genome_dir {input} --mash_db {params.mashdb} --scratch_dir {params.scratchdir} \
+        gtdbtk classify_wf --genome_dir {params.dir_asmbl} --mash_db {params.mashdb} --scratch_dir {params.scratchdir} \
         --out_dir {output.fld} --extension {params.extension} --cpus {threads} --tmpdir {params.tmpdir}
         """
 
-rule DRAM_annot:
+rule DRAM:
     input:
         asmbl = "../../results/final_assemblies_simple/{sample}.fna",
         checkm = "../../results/checkm/checkm_report_extended.txt",
         gtdbtk = "../../results/gtdbtk_classify/classify/gtdbtk.bac120.summary.tsv",
         config = "../config/dram-1.4.6_config.txt"
     output:
-        directory("../../results/annotation/DRAM_annotate/{sample}_DRAM")
+        fld1 = directory("../../results/annotation/DRAM/{sample}_DRAM"),
+        fld2 = directory("../../results/annotation/DRAM/{sample}_DRAM/distill"),
+        annot = "../../results/annotation/DRAM/{sample}_DRAM/annotations.tsv",
+        faa = "../../results/annotation/DRAM/{sample}_DRAM/genes.faa",
+        fna = "../../results/annotation/DRAM/{sample}_DRAM/genes.fna",
+        gbk = "../../results/annotation/DRAM/{sample}_DRAM/genbank/{sample}.gbk",
+        scaff = "../../results/annotation/DRAM/{sample}_DRAM/scaffolds.fna",
+        gff = "../../results/annotation/DRAM/{sample}_DRAM/genes.gff",
+        met = "../../results/annotation/DRAM/{sample}_DRAM/distill/metabolism_summary.xlsx",
+        prod1 = "../../results/annotation/DRAM/{sample}_DRAM/distill/product.html",
+        prod2 = "../../results/annotation/DRAM/{sample}_DRAM/distill/product.tsv",
+        stats = "../../results/annotation/DRAM/{sample}_DRAM/distill/genome_stats.tsv"
+    params:
+        trnas = "../../results/annotation/DRAM/{sample}_DRAM/trnas.tsv",
+        rrnas = "../../results/annotation/DRAM/{sample}_DRAM/rrnas.tsv"
     log:
-        "../../logs/annotation/dram/{sample}_dram.log"
-    benchmark:
-        "../../benchmarks/annotation/{sample}_dram.benchmark"
+        "../../logs/annotation/DRAM/{sample}_dram.log"
     conda:
         "../envs/dram-1.4.6.yaml"
     threads: 8
     resources:
         account = "pengel_general_data",
-        mem_mb = 100000,
-        runtime= "2h"
+        mem_mb = 30000,
+        runtime= "6h"
     shell:
         """
+        rm -rf {output.fld1};
         (DRAM-setup.py import_config --config_loc {input.config}) 2> {log};
-        (DRAM.py annotate -i {input.asmbl} \
-         -o {output} --min_contig_size 999 \
-         --threads {threads} --verbose \
-         --checkm_quality {input.checkm} --gtdb_taxonomy {input.gtdbtk}) 2> {log} 
-         """
+        (DRAM.py annotate -i {input.asmbl} -o {output.fld1} --min_contig_size 999 \
+        --checkm_quality {input.checkm} --gtdb_taxonomy {input.gtdbtk} --threads {threads} --verbose) 2> {log};
+        if [[ -f {params.trnas} && -f {params.rrnas} ]]; then
+            (DRAM.py distill -i {output.annot} -o {output.fld2} --trna_path {params.trnas} \
+            --rrna_path {params.rrnas}) 2>> {log}
+        elif [[ -f {params.trnas} && ! -f {params.rrnas} ]]; then
+            (DRAM.py distill -i {output.annot} -o {output.fld2} --trna_path {params.trnas}) 2>> {log}
+        elif [[ ! -f {params.trnas} && ! -f {params.rrnas} ]]; then
+            (DRAM.py distill -i {output.annot} -o {output.fld2}) 2>> {log}
+        fi
+        """
 
-rule DRAM_distill:
+rule extract_16s:
     input:
-        fld = "../../results/annotation/DRAM_annotate/{sample}_DRAM",
-        config = "../config/dram-1.4.6_config.txt"
+        "../../results/annotation/DRAM/{sample}_DRAM/scaffolds.fna"
     output:
-        directory("../../results/annotation/DRAM_distill/{sample}_DRAM_distill")
+        barr = "../../results/annotation/rRNAS/{sample}_rrnas.fna",
+        seqs = "../../results/annotation/rRNAS/{sample}_16S.fna"
+    params:
+        fld = "../../results/annotation/rRNAS",
+        king = "bac"
     log:
-        "../../logs/annotation/distill/{sample}_distill.log"
-    benchmark:
-        "../../benchmarks/annotation/{sample}_dram_distill.benchmark"
-    threads: 8
+        "../../logs/annotation/barrnap/{sample}_barrnap.log"
     conda:
         "../envs/dram-1.4.6.yaml"
-    resources:
-        account = "pengel_general_data",
-        mem_mb = 10000,
-        runtime= "2h"
-    shell:
-        """
-        (DRAM-setup.py import_config --config_loc {input.config}) 2> {log}; 
-        (DRAM.py distill -i {input.fld}/annotations.tsv -o {output} --trna_path {input.fld}/trnas.tsv \
-        --rrna_path {input.fld}/rrnas.tsv) 2> {log}
-        """
-
-# rename and reorganize the DRAM outputs
-
-rule move_DRAM_outputs:
-    input:
-        dram = "../../results/annotation/DRAM_annotate/{sample}_DRAM",
-        distill = "../../results/annotation/DRAM_distill/{sample}_DRAM_distill"
-    output:
-        directory("../../results/annotation/DRAM_mainoutputs/{sample}")
-    log:
-        "../../logs/annotation/move/{sample}.log"
     threads: 1
     resources:
         account = "pengel_general_data",
-        mem_mb = 1000,
-        runtime= "10m"
+        mem_mb = 2000,
+        runtime= "1h"
     shell:
         """
-        mkdir -p {output};
-        cut -f2- {input.dram}/annotations.tsv > {output}/{wildcards.sample}_annotations.tsv;
-        mv {input.dram}/genes.faa {output}/{wildcards.sample}_genes.faa;
-        mv {input.dram}/genes.fna {output}/{wildcards.sample}_genes.fna;
-        mv {input.dram}/rrnas.tsv {output}/{wildcards.sample}_genes.tsv;
-        mv {input.dram}/trnas.tsv {output}/{wildcards.sample}_trnas.tsv;
-        mv {input.dram}/genbank/{wildcards.sample}.gbk {output};
-        mv {input.distill}/genome_stats.tsv {output}/{wildcards.sample}_genome_stats.tsv;
-        mv {input.distill}/metabolism_summary.xlsx {output}/{wildcards.sample}_metabolism_summary.xlsx;
-        mv {input.distill}/product.html {output}/{wildcards.sample}_product.html
-        mv {input.distill}/product.tsv {output}/{wildcards.sample}_product.tsv
+        mkdir -p {params.fld};
+        barrnap --threads {threads} --kingdom {params.king} --outseq {output.barr} < {input};
+        sed -i "s/>/>{wildcards.sample}|/g" {output.barr};
+        grep -A 1 "16S" {output.barr} > {output.seqs}
         """
 
-# TODO
-# - Defense finder
-# - RGI
+# remove all * from input fasta before passing it to rgi
 
-# ################################### DEFENSE SYSTEMS ##########################################################################
-# rule DF_launch:
-#     input:
-#         faa="../results/genomes_anntations/{sample}_annot_genome/genes.faa"
+rule rgi:
+    input:
+        "../../results/annotation/DRAM/{sample}_DRAM/genes.faa"
+    output:
+        fld = directory("../../results/annotation/RGI/{sample}"),
+        raw = "../../results/annotation/RGI/{sample}/{sample}_RGI_raw.txt",
+        filtered = "../../results/annotation/RGI/{sample}/{sample}_RGI_filtered.txt"
+    params:
+        tmp = "../../results/annotation/RGI/{sample}/{sample}.faa.tmp",
+        db = "/work/FAC/FBM/DMF/pengel/general_data/mgarci14/RGI_db/card.json",
+        bn = "../../results/annotation/RGI/{sample}/{sample}_RGI_raw"
+    log:
+        "../../logs/annotation/RGI/{sample}_rgi.log"
+    conda:
+        "../envs/rgi-6.0.3.yaml"
+    threads: 1
+    resources:
+        account = "pengel_general_data",
+        mem_mb = 4000,
+        runtime= "1h"
+    shell:
+        """
+        rgi load --card_json {params.db} --local;
+        sed 's/*//g' {input} > {params.tmp}
+        rgi main --input_sequence {params.tmp} --output_file {params.bn} --local --clean --include_loose -t protein -n {threads};
+        awk -F '\t' '($10>40) && ($21>70) {{print}}' {output.raw} > {output.filtered};
+        rm -rf {params.tmp}
+        """
+
+# If macsyfinder is installed with the latest version it works
+# the conda environment also contains biopython
+
+rule macsydata:
+    output:
+        fld = directory("../../results/annotation/macsyfinder/data"),
+        file = "../../results/annotation/macsyfinder/macsydata/macsydata.txt"
+    log:
+        "../../logs/annotation/macsyfinder/macsydata.log"
+    conda:
+        "../envs/macsyfinder-2.1.4.yaml"
+    threads: 1
+    resources:
+        account = "pengel_general_data",
+        mem_mb = 2000,
+        runtime= "15m"
+    shell:
+        """
+        mkdir -p {output.fld};
+        mkdir -p ${{CONDA_PREFIX}}/share/macsyfinder/models/profiles;
+        mkdir -p ${{CONDA_PREFIX}}/share/macsyfinder/models/definitions;
+        mkdir -p ${{CONDA_PREFIX}}/share/macsyfinder/doc/profiles;
+        mkdir -p ${{CONDA_PREFIX}}/share/macsyfinder/doc/definitions;
+        macsydata install --target ${{CONDA_PREFIX}}/share/macsyfinder TXSScan;
+        touch {output.file}
+        """
+
+# macsyfinder can run on both unordered and ordered genomes, but in the ordered mode more informative outputs are produced
+# normally the genes.faa file from DRAM is already ordered
+# if you start from a .faa file that did not come from DRAM (i.e. downloaded from NCBI), ensure the genes are correctly ordered
+
+rule reorder_genes:
+    input:
+        data = "../../results/annotation/macsyfinder/macsydata/macsydata.txt",
+        gff = "../../results/annotation/DRAM/{sample}_DRAM/genes.gff",
+        faa = "../../results/annotation/DRAM/{sample}_DRAM/genes.faa"
+    output:
+        "../../results/annotation/macsyfinder/ordered_genomes/{sample}_ordered.faa"
+    params:
+        fld = "../../results/annotation/macsyfinder/ordered_genomes"
+    conda:
+        "../envs/macsyfinder-2.1.4.yaml"
+    log:
+        "../../logs/annotation/macsyfinder/order_genes/{sample}.log"
+    threads: 1
+    resources:
+        account = "pengel_general_data",
+        mem_mb = 2000,
+        runtime= "1h"
+    script:
+        "order_genes.py"
+
+rule macsyfinder:
+    input:
+        data = "../../results/annotation/macsyfinder/macsydata/macsydata.txt",
+        faa = "../../results/annotation/macsyfinder/ordered_genomes/{sample}_ordered.faa"
+    output:
+        directory("../../results/annotation/macsyfinder/{sample}")
+    log:
+        "../../logs/annotation/macsyfinder/{sample}_df.log"
+    conda:
+        "../envs/macsyfinder-2.1.4.yaml"
+    threads: 1
+    resources:
+        account = "pengel_general_data",
+        mem_mb = 4000,
+        runtime= "1h"
+    shell:
+        """
+        macsyfinder --sequence-db {input.faa} -o {output} --models-dir ${{CONDA_PREFIX}}/share/macsyfinder --models TXSScan all --db-type ordered_replicon -w {threads} -vv
+        """
+        
+## There are currently issues with macsyfinder so I cannot run defense-finder (it needs macsyfinder)
+
+# rule defense_finder_update:
 #     output:
-#         directory("../results/AVD_output/DF_output/{sample}_DF_output")
-#     conda:
-#         "envs/DF_env.yaml"
-#     threads: 10
+#         fld = directory("../../results/annotation/defense-finder/update"),
+#         file = "../../results/annotation/defense-finder/update/update.txt"
 #     log:
-#         "logs/defense_systems/DF/{sample}_DF.log"
+#         "../../logs/annotation/defense-finder/update.log"
+#     conda:
+#         "../envs/defense-finder-1.3.0.yaml"
+#     threads: 1
 #     resources:
-#         account = "pengel_beemicrophage",
-#         mem_mb = 10000,
-#         runtime= "00:30:00"
+#         account = "pengel_general_data",
+#         mem_mb = 4000,
+#         runtime= "1h"
 #     shell:
-#         #"defense-finder update; " # run only the first time you launch this ule, Idk how to make it more elegant
-#         "(defense-finder run {input.faa} --out-dir {output}) 2> {log}"
+#         """
+#         mkdir -p {output.fld};
+#         defense-finder update;
+#         touch {output.file}
+#         """
+
+# rule defense_finder:
+#     input:
+#         update = "../../results/annotation/defense-finder/update/update.txt",
+#         faa = "../../results/annotation/DRAM/{sample}_DRAM/genes.faa"
+#     output:
+#         directory("../../results/annotation/defense-finder/{sample}")
+#     log:
+#         "../../logs/annotation/defense-finder/{sample}_df.log"
+#     conda:
+#         "../envs/defense-finder-1.3.0.yaml"
+#     threads: 1
+#     resources:
+#         account = "pengel_general_data",
+#         mem_mb = 4000,
+#         runtime= "1h"
+#     shell:
+#         """
+#         (defense-finder run {input.faa} --out-dir {output}) 2> {log}
+#         """
